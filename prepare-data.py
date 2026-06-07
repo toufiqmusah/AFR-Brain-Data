@@ -1,11 +1,8 @@
+import argparse
 import csv
 import json
 import os
 import shutil
-
-RAW_DIR = 'proj-6554f423b094062da63aa4c9'
-PARTICIPANT_TSV = 'participant-info.tsv'
-OUTPUT_DIR = 'train_data'
 
 NIFTI_NAMES = {'t1': 'T1w', 't2': 'T2w', 'flair': 'FLAIR', 'dwi': 'DWI'}
 
@@ -66,15 +63,36 @@ def make_output_name(subject_dir, info):
 
 
 def main():
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    parser = argparse.ArgumentParser(description="Preprocess and organize NIfTI brain imaging data.")
+    parser.add_argument(
+        '--raw-dir', 
+        type=str, 
+        default='Dataset', 
+        help="Path to the raw dataset directory (default: 'Dataset')"
+    )
+    parser.add_argument(
+        '--participant-tsv', 
+        type=str, 
+        default='/content/AFR-Brain-Data/participant-info.tsv', 
+        help="Path to the participant info TSV file (default: '/content/AFR-Brain-Data/participant-info.tsv')"
+    )
+    parser.add_argument(
+        '--output-dir', 
+        type=str, 
+        default='/content/Preprocessed-Dataset', 
+        help="Path to the output directory (default: '/content/Preprocessed-Dataset')"
+    )
+    args = parser.parse_args()
 
-    participant_map = load_participants(PARTICIPANT_TSV)
+    os.makedirs(args.output_dir, exist_ok=True)
+
+    participant_map = load_participants(args.participant_tsv)
     print(f"Loaded {len(participant_map)} participant mappings")
 
     stats = {}
     copied = 0
 
-    for subject_dir, full_path in iter_subject_dirs(RAW_DIR):
+    for subject_dir, full_path in iter_subject_dirs(args.raw_dir):
         subj_id = subject_dir.split('-')[1].split('.')[0].zfill(2)
         diagnosis = participant_map.get(subj_id)
         if not diagnosis:
@@ -88,7 +106,7 @@ def main():
 
         for info in nifti_infos:
             out_name, modality = make_output_name(subject_dir, info)
-            out_dir = os.path.join(OUTPUT_DIR, diagnosis, modality)
+            out_dir = os.path.join(args.output_dir, diagnosis, modality)
             os.makedirs(out_dir, exist_ok=True)
 
             dst = os.path.join(out_dir, out_name)

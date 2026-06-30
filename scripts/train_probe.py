@@ -37,8 +37,6 @@ def parse_args():
     parser.add_argument("--output", default="outputs/results")
     parser.add_argument("--checkpoint-dir", default="outputs/checkpoints")
     parser.add_argument("--resume", default=None)
-    parser.add_argument("--checkpoint-dir", default="outputs/checkpoints")
-    parser.add_argument("--resume", default=None)
     return parser.parse_args()
 
 

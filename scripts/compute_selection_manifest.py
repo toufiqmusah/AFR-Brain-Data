@@ -8,8 +8,15 @@ The manifest is consumed by NigerianBrainDataset(selection_manifest=...)
 to make deterministic, reproducible selections without re-running scoring.
 
 Usage:
+    # Using raw data (metadata + volumes both from same directory)
     python scripts/compute_selection_manifest.py \
         --root-dir /teamspace/studios/this_studio/Dataset \
+        --output outputs/selection_manifest.json
+
+    # Using skull-stripped data (volumes from stripped dir, metadata from original)
+    python scripts/compute_selection_manifest.py \
+        --root-dir /teamspace/studios/this_studio/Dataset \
+        --data-dir /content/Dataset_SkullStripped \
         --output outputs/selection_manifest.json
 """
 
@@ -28,7 +35,11 @@ def parse_args():
     parser = argparse.ArgumentParser(
         description="Compute selection manifest with quality-based tiebreaking"
     )
-    parser.add_argument("--root-dir", default="/teamspace/studios/this_studio/Dataset")
+    parser.add_argument("--root-dir", default="/teamspace/studios/this_studio/Dataset",
+                        help="Original dataset directory (with _info.json for metadata)")
+    parser.add_argument("--data-dir", default=None,
+                        help="Directory with NIfTI volumes (e.g. skull-stripped). "
+                             "Metadata is read from --root-dir. Defaults to --root-dir.")
     parser.add_argument("--output", default="outputs/selection_manifest.json")
     parser.add_argument(
         "--orientation-priority", nargs="+", default=["axial", "coronal", "sagittal"]
@@ -56,9 +67,18 @@ def main():
     from data.quality import VolumeQualityScorer
 
     root = Path(args.root_dir)
-    print(f"Scanning {root} ...")
+    data_root = Path(args.data_dir) if args.data_dir else root
+
+    print(f"Scanning metadata from {root} ...")
     all_records = scan_raw_dataset(root)
     print(f"  {len(all_records)} raw records")
+
+    if args.data_dir:
+        print(f"Loading volumes from {data_root}")
+        orig_root_str = str(root.resolve())
+        data_root_str = str(data_root.resolve())
+        for r in all_records:
+            r["path"] = r["path"].replace(orig_root_str, data_root_str, 1)
 
     scorer = VolumeQualityScorer(alpha=args.quality_alpha)
     orientation_rank = {o: i for i, o in enumerate(args.orientation_priority)}

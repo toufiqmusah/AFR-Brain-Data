@@ -35,7 +35,7 @@ def parse_args():
     parser.add_argument("--splits", default="outputs/splits/splits.json",
                         help="Pre-computed fold splits JSON")
     parser.add_argument("--participant-tsv", default=None,
-                        help="Path to participant-info.tsv; defaults to --root-dir/participant-info.tsv")
+                        help="Path to participant-info.tsv; defaults to --root-dir or script parent dir")
     parser.add_argument("--model", default="vit3d", choices=["neurojepa", "neurovfm", "brainiac", "primus", "vit3d"])
     parser.add_argument("--config", default="t1w", help="Configuration label (t1w, t2w, flair, t1_t2, t1_t2_flair)")
     parser.add_argument("--modalities", nargs="+", default=["T1w"])
@@ -67,11 +67,28 @@ def main():
 
     modalities = _resolve_modalities(args)
 
+    # Resolve participant TSV: check root dir first, then script parent dir
+    if args.participant_tsv:
+        tsv_path = args.participant_tsv
+    else:
+        tsv_candidates = [
+            Path(args.root_dir) / "participant-info.tsv",
+            Path(__file__).parent.parent / "participant-info.tsv",
+        ]
+        tsv_path = None
+        for p in tsv_candidates:
+            if p.exists():
+                tsv_path = str(p)
+                break
+
     print(f"Model: {args.model}")
     print(f"Config: {args.config}")
     print(f"Modalities: {modalities}")
     print(f"Root dir: {args.root_dir}")
+    if args.data_root:
+        print(f"Data root: {args.data_root}")
     print(f"Selection manifest: {args.selection_manifest}")
+    print(f"Participant TSV: {tsv_path}")
     print(f"Splits: {args.splits}")
 
     transform = train_transform()
@@ -79,7 +96,7 @@ def main():
     full_dataset = NigerianBrainDataset(
         root_dir=args.root_dir,
         data_root=args.data_root,
-        participant_tsv=args.participant_tsv,
+        participant_tsv=tsv_path,
         modalities=tuple(modalities),
         selection_manifest=args.selection_manifest,
         transform=transform,
@@ -91,7 +108,7 @@ def main():
         print(f"Loaded {len(folds)} pre-computed folds from {args.splits}")
     else:
         folds = generate_splits(full_dataset.index, n_folds=args.n_folds, seed=args.seed)
-        print(f"Generated {len(folds)} stratified folds")
+        print(f"Generated {len(folds)} stratified folds ({len(full_dataset.index)} subjects)")
 
     all_fold_metrics = []
 
@@ -106,7 +123,7 @@ def main():
         train_dataset = NigerianBrainDataset(
             root_dir=args.root_dir,
             data_root=args.data_root,
-            participant_tsv=args.participant_tsv,
+            participant_tsv=tsv_path,
             modalities=tuple(modalities),
             selection_manifest=args.selection_manifest,
             split_ids=train_ids,
@@ -115,7 +132,7 @@ def main():
         test_dataset = NigerianBrainDataset(
             root_dir=args.root_dir,
             data_root=args.data_root,
-            participant_tsv=args.participant_tsv,
+            participant_tsv=tsv_path,
             modalities=tuple(modalities),
             selection_manifest=args.selection_manifest,
             split_ids=test_ids,

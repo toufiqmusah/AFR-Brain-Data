@@ -228,6 +228,8 @@ class NigerianBrainDataset(Dataset):
             self.labels = load_participant_tsv(participant_tsv, self.label_map)
         else:
             psv_path = self.root_dir / "participant-info.tsv"
+            if not psv_path.exists():
+                psv_path = Path(__file__).parent.parent / "participant-info.tsv"
             if psv_path.exists():
                 self.labels = load_participant_tsv(str(psv_path), self.label_map)
             else:

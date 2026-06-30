@@ -25,6 +25,8 @@ def parse_args():
     parser.add_argument("--input-dir", required=True, help="Directory with NIfTI files (.nii.gz)")
     parser.add_argument("--output-dir", required=True, help="Output directory")
     parser.add_argument("--device", default="cuda", choices=["cuda", "cpu", "mps"])
+    parser.add_argument("--modalities", nargs="+", default=None,
+                        help="Modalities to process (default: T1w T2w FLAIR; DWI excluded)")
     parser.add_argument("--disable-tta", action="store_true", help="Disable test-time augmentation (faster)")
     parser.add_argument("--save-mask", action="store_true", help="Keep the brain mask files")
     parser.add_argument("--verbose", action="store_true")
@@ -50,6 +52,8 @@ def main():
     from data.dataset import scan_raw_dataset
 
     records = scan_raw_dataset(input_dir)
+    keep_mods = args.modalities if args.modalities else {"T1w", "T2w", "FLAIR"}
+    records = [r for r in records if r["modality"] in keep_mods]
     nifti_files = [Path(r["path"]) for r in records]
     nifti_files = sorted(set(nifti_files))
     if not nifti_files:
@@ -65,18 +69,25 @@ def main():
         verbose=args.verbose,
     )
 
+    skipped = 0
     for i, fpath in enumerate(nifti_files):
         rel = fpath.relative_to(input_dir)
         out_path = output_dir / rel
         out_path.parent.mkdir(parents=True, exist_ok=True)
         print(f"[{i+1}/{len(nifti_files)}] {rel}")
-        hdbet_predict(
-            str(fpath),
-            str(out_path),
-            predictor,
-            keep_brain_mask=args.save_mask,
-            compute_brain_extracted_image=True,
-        )
+        try:
+            hdbet_predict(
+                str(fpath),
+                str(out_path),
+                predictor,
+                keep_brain_mask=args.save_mask,
+                compute_brain_extracted_image=True,
+            )
+        except Exception as e:
+            print(f"  SKIP: {e.__class__.__name__} — {e}")
+            skipped += 1
+    if skipped:
+        print(f"\nSkipped {skipped} files (likely DWI — HD-BET only supports T1w/T2w/FLAIR)")
 
     print(f"\nDone. Output: {output_dir}")
 

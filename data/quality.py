@@ -4,17 +4,28 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 
+def _normalize_slice(slice_2d):
+    """Percentile clip + min-max to [0, 1]."""
+    lo, hi = np.percentile(slice_2d, [2, 98])
+    clipped = np.clip(slice_2d, lo, hi)
+    rng = clipped.max() - clipped.min()
+    if rng < 1e-8:
+        return np.zeros_like(clipped)
+    return (clipped - clipped.min()) / rng
+
+
 def compute_brisque_slice(slice_2d):
     """BRISQUE score for a 2D image slice. Lower = better."""
     try:
         from piq import brisque
         import torch
 
-        img_t = torch.from_numpy(slice_2d).float().unsqueeze(0).unsqueeze(0)
+        normed = _normalize_slice(slice_2d)
+        img_t = torch.from_numpy(normed).float().unsqueeze(0).unsqueeze(0)
         with torch.no_grad():
             score = brisque(img_t)
         return score.item()
-    except ImportError:
+    except Exception:
         return None
 
 
@@ -24,14 +35,14 @@ def compute_clip_iqa_slice(slice_2d):
         from piq import clip_iqa
         import torch
 
-        if slice_2d.ndim == 2:
-            slice_2d = np.stack([slice_2d] * 3, axis=-1)
-        img_t = torch.from_numpy(slice_2d).float().permute(2, 0, 1).unsqueeze(0)
-        img_t = (img_t - img_t.min()) / (img_t.max() - img_t.min() + 1e-8)
+        normed = _normalize_slice(slice_2d)
+        if normed.ndim == 2:
+            normed = np.stack([normed] * 3, axis=-1)
+        img_t = torch.from_numpy(normed).float().permute(2, 0, 1).unsqueeze(0)
         with torch.no_grad():
             score = clip_iqa(img_t)
         return score.item()
-    except ImportError:
+    except Exception:
         return None
 
 

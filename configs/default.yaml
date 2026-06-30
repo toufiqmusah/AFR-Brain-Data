@@ -3,7 +3,7 @@ data:
   participant_tsv: /teamspace/studios/this_studio/Dataset/participant-info.tsv
   target_size: [96, 112, 96]
   orientation_priority: [axial, coronal, sagittal]
-  exclude_gadolinium: true
+  exclude_gadolinium: false
   use_quality_selection: false
   quality_cache: outputs/quality_cache/scores.json
   missing_modality_strategy: drop

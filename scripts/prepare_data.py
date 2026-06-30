@@ -32,7 +32,7 @@ def parse_args():
     parser.add_argument("--participant-tsv", default=None)
     parser.add_argument("--target-size", nargs=3, type=int, default=[96, 112, 96])
     parser.add_argument("--orientation-priority", nargs="+", default=["axial", "coronal", "sagittal"])
-    parser.add_argument("--exclude-gadolinium", action="store_true", default=True)
+    parser.add_argument("--exclude-gadolinium", action="store_true", default=False)
     parser.add_argument("--include-dwi", action="store_true", default=False)
     parser.add_argument("--selection-manifest", default=None)
     parser.add_argument("--save-numpy", action="store_true", help="Save as .npy arrays instead")

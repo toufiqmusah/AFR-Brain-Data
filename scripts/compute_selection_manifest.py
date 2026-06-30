@@ -44,7 +44,8 @@ def parse_args():
     parser.add_argument(
         "--orientation-priority", nargs="+", default=["axial", "coronal", "sagittal"]
     )
-    parser.add_argument("--exclude-gadolinium", action="store_true", default=True)
+    parser.add_argument("--exclude-gadolinium", action="store_true", default=False,
+                        help="Flag to exclude gadolinium-enhanced T1w (default: include but track)")
     parser.add_argument("--quality-n-slices", type=int, default=10)
     parser.add_argument("--quality-alpha", type=float, default=0.5)
     return parser.parse_args()
@@ -88,6 +89,8 @@ def main():
     orientation_rank = {o: i for i, o in enumerate(args.orientation_priority)}
 
     groups = defaultdict(list)
+    load_ok = 0
+    load_fail = 0
     for r in all_records:
         groups[(r["subject"], r["modality"])].append(r)
 
@@ -107,8 +110,10 @@ def main():
         for c in cands:
             try:
                 vol = load_volume(c["path"])
+                load_ok += 1
                 quality = scorer.score_volume(vol, n_slices=args.quality_n_slices)
             except Exception:
+                load_fail += 1
                 quality = None
             scored.append(
                 {
@@ -168,7 +173,8 @@ def main():
     selection_list = []
     for key, (abs_path, rel_path) in sorted(selected.items()):
         subj_str, mod = key.split("_", 1)
-        selection_list.append({"subject": int(subj_str), "modality": mod, "selected_path": rel_path})
+        selection_list.append({"subject": int(subj_str), "modality": mod, "selected_path": rel_path,
+                                 "contrast": champ["contrast"]})
 
     manifest = {
         "description": "Nigerian Brain Dataset — selection manifest",
@@ -192,7 +198,11 @@ def main():
 
     print(f"\nWrote {output_path}")
     print(f"  {len(selection_list)} subject-modality entries selected")
-    print(f"  Candidates scored: {sum(len(v) for v in candidates_index.values())}")
+    print(f"  {sum(len(v) for v in candidates_index.values())} candidates after gadolinium filter")
+    print(f"  Volumes loaded: {load_ok}, failed: {load_fail}")
+    if load_ok > 0:
+        with_quality = sum(1 for v in candidates_index.values() for c in v if c.get("quality") is not None)
+        print(f"  Candidates with quality scores: {with_quality}")
 
 
 if __name__ == "__main__":

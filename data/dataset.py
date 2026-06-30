@@ -186,7 +186,7 @@ class NigerianBrainDataset(Dataset):
         participant_tsv: Optional[str] = None,
         modalities: Tuple[str, ...] = ("T1w",),
         orientation_priority: Tuple[str, ...] = ("axial", "coronal", "sagittal"),
-        exclude_gadolinium: bool = True,
+        exclude_gadolinium: bool = False,
         selection_manifest: Optional[str] = None,
         data_root: Optional[str] = None,
         target_size: Tuple[int, int, int] = (96, 112, 96),

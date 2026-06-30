@@ -26,6 +26,8 @@ from tqdm import tqdm
 def parse_args():
     parser = argparse.ArgumentParser(description="Prepare and package the Nigerian Brain Dataset")
     parser.add_argument("--root-dir", default="/teamspace/studios/this_studio/Dataset")
+    parser.add_argument("--data-root", default=None,
+                        help="Directory with NIfTI volumes (e.g. skull-stripped). Defaults to --root-dir.")
     parser.add_argument("--output-dir", default="/teamspace/studios/this_studio/Prepared-Dataset")
     parser.add_argument("--participant-tsv", default=None)
     parser.add_argument("--target-size", nargs=3, type=int, default=[96, 112, 96])
@@ -67,6 +69,7 @@ def main():
         orientation_priority=tuple(args.orientation_priority),
         exclude_gadolinium=args.exclude_gadolinium,
         selection_manifest=args.selection_manifest,
+        data_root=args.data_root,
         target_size=tuple(args.target_size),
         transform=transform,
     )

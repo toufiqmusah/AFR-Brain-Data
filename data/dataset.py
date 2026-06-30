@@ -188,6 +188,7 @@ class NigerianBrainDataset(Dataset):
         orientation_priority: Tuple[str, ...] = ("axial", "coronal", "sagittal"),
         exclude_gadolinium: bool = True,
         selection_manifest: Optional[str] = None,
+        data_root: Optional[str] = None,
         target_size: Tuple[int, int, int] = (96, 112, 96),
         split_ids: Optional[List[int]] = None,
         label_map: Optional[Dict[str, int]] = None,
@@ -197,6 +198,7 @@ class NigerianBrainDataset(Dataset):
         transform: Optional[callable] = None,
     ):
         self.root_dir = Path(root_dir)
+        self.data_root = Path(data_root) if data_root else self.root_dir
         self.modalities = modalities
         self.orientation_priority = orientation_priority
         self.exclude_gadolinium = exclude_gadolinium
@@ -214,10 +216,11 @@ class NigerianBrainDataset(Dataset):
         if selection_manifest is not None:
             with open(selection_manifest) as f:
                 manifest = json.load(f)
-            self._manifest_lookup = {
-                (e["subject"], e["modality"]): e["selected_path"]
-                for e in manifest["selection"]
-            }
+            self._manifest_lookup = {}
+            for e in manifest["selection"]:
+                rel_path = e["selected_path"]
+                full_path = str((self.root_dir / rel_path).resolve())
+                self._manifest_lookup[(e["subject"], e["modality"])] = full_path
         else:
             self._manifest_lookup = None
 
@@ -356,7 +359,10 @@ class NigerianBrainDataset(Dataset):
                 vol = np.zeros((1, *self.target_size), dtype=np.float32)
                 volumes.append(vol)
                 continue
-            vol = self._load_volume(rec["path"])
+            path = rec["path"]
+            if self.data_root != self.root_dir:
+                path = str(self.data_root / Path(path).relative_to(self.root_dir))
+            vol = self._load_volume(path)
             vol = self._resample_volume(vol)
             vol = (vol - vol.mean()) / (vol.std() + 1e-8)
             vol = vol[np.newaxis, ...]

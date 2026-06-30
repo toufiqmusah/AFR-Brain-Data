@@ -28,10 +28,9 @@ class ViT3D(nn.Module):
             num_heads=num_heads,
             num_layers=depth,
             mlp_dim=int(hidden_size * mlp_ratio),
-            dropout=dropout,
+            dropout_rate=dropout,
             spatial_dims=3,
             classification=False,
-            post_activation=False,
             num_classes=0,
         )
 

@@ -55,6 +55,10 @@ class Trainer:
         for batch in self.train_loader:
             x = batch["volume"].to(self.device)
             labels = batch["label"].to(self.device).long()
+
+        for batch in self.val_loader:
+            x = batch["volume"].to(self.device)
+            labels = batch["label"].to(self.device).long()
             self.optimizer.zero_grad()
             with torch.no_grad():
                 features = self.model(x)
@@ -78,7 +82,7 @@ class Trainer:
         all_preds, all_labels, all_probs = [], [], []
         for batch in self.val_loader:
             x = batch["volume"].to(self.device)
-            labels = batch["label"].to(self.device).long()
+            labels = batch["label"].to(self.device).long().flatten()
             features = self.model(x)
             if isinstance(features, tuple):
                 features = features[0]

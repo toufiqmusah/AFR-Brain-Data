@@ -6,6 +6,7 @@ scikit-learn
 matplotlib
 tqdm
 pyyaml
+monai
 
 # Model-specific (install as needed from source)
 # neurojepa: pip install -e /path/to/Neuro-JEPA

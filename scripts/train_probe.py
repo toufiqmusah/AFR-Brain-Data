@@ -176,7 +176,7 @@ def main():
                 backbone.load_dummy()
         elif args.model == "vit3d":
             from models.vit3d_baseline import ViT3D
-            backbone = ViT3D(n_classes=len(set(d.label for d in full_dataset.index)))
+            backbone = ViT3D(n_classes=len(set(d["label"] for d in full_dataset.index)))
         else:
             raise ValueError(f"Unknown model: {args.model}")
 

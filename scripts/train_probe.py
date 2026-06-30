@@ -187,7 +187,7 @@ def main():
         backbone.eval()
 
         n_channels = len(modalities)
-        if n_channels > 1:
+        if n_channels > 1 and hasattr(backbone, "adapt_patch_embed"):
             backbone.adapt_patch_embed(n_channels)
 
         hidden_dim = backbone.hidden_dim

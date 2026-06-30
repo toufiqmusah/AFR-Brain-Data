@@ -45,9 +45,13 @@ def main():
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    nifti_files = sorted(input_dir.rglob("*.nii.gz"))
-    if not nifti_files:
-        nifti_files = sorted(input_dir.rglob("*.nii"))
+    import sys
+    sys.path.insert(0, str(Path(__file__).parent.parent))
+    from data.dataset import scan_raw_dataset
+
+    records = scan_raw_dataset(input_dir)
+    nifti_files = [Path(r["path"]) for r in records]
+    nifti_files = sorted(set(nifti_files))
     if not nifti_files:
         print(f"No NIfTI files found in {input_dir}")
         return

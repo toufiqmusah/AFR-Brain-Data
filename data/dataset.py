@@ -187,8 +187,7 @@ class NigerianBrainDataset(Dataset):
         modalities: Tuple[str, ...] = ("T1w",),
         orientation_priority: Tuple[str, ...] = ("axial", "coronal", "sagittal"),
         exclude_gadolinium: bool = True,
-        use_quality_selection: bool = False,
-        quality_cache: Optional[str] = None,
+        selection_manifest: Optional[str] = None,
         target_size: Tuple[int, int, int] = (96, 112, 96),
         split_ids: Optional[List[int]] = None,
         label_map: Optional[Dict[str, int]] = None,
@@ -201,8 +200,6 @@ class NigerianBrainDataset(Dataset):
         self.modalities = modalities
         self.orientation_priority = orientation_priority
         self.exclude_gadolinium = exclude_gadolinium
-        self.use_quality_selection = use_quality_selection
-        self.quality_cache = quality_cache
         self.target_size = target_size
         self.split_ids = split_ids
         self.binary_target = binary_target
@@ -213,6 +210,16 @@ class NigerianBrainDataset(Dataset):
             self.modalities = ("DWI",)
 
         all_records = scan_raw_dataset(self.root_dir)
+
+        if selection_manifest is not None:
+            with open(selection_manifest) as f:
+                manifest = json.load(f)
+            self._manifest_lookup = {
+                (e["subject"], e["modality"]): e["selected_path"]
+                for e in manifest["selection"]
+            }
+        else:
+            self._manifest_lookup = None
 
         if participant_tsv is not None:
             self.labels = load_participant_tsv(participant_tsv, self.label_map)
@@ -266,20 +273,29 @@ class NigerianBrainDataset(Dataset):
 
             for mod in self.modalities:
                 candidates = available.get(mod, [])
-                if self.exclude_gadolinium and mod == "T1w":
-                    candidates = [c for c in candidates if not c["contrast"]]
-                if not candidates:
-                    if self._modality_str(self.modalities[0]) != self._modality_str(mod):
+                if self._manifest_lookup is not None:
+                    key = (subj, mod)
+                    sel_path = self._manifest_lookup.get(key)
+                    if sel_path is None:
                         continue
-                    if self._modality_str(mod) == self._modality_str("DWI") and not candidates:
+                    best = next((c for c in candidates if c["path"] == sel_path), None)
+                    if best is None:
                         continue
-                    if self.split_ids is not None:
+                else:
+                    if self.exclude_gadolinium and mod == "T1w":
+                        candidates = [c for c in candidates if not c["contrast"]]
+                    if not candidates:
+                        if self._modality_str(self.modalities[0]) != self._modality_str(mod):
+                            continue
+                        if self._modality_str(mod) == self._modality_str("DWI") and not candidates:
+                            continue
+                        if self.split_ids is not None:
+                            continue
+                    if not candidates:
+                        if self.missing_modality_strategy == "drop":
+                            break
                         continue
-                if not candidates:
-                    if self.missing_modality_strategy == "drop":
-                        break
-                    continue
-                best = select_best_record(candidates, self.orientation_priority)
+                    best = select_best_record(candidates, self.orientation_priority)
                 selected[mod] = best
                 loaded.append(mod)
                 if best["contrast"]:

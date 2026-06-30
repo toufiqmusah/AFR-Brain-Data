@@ -32,7 +32,7 @@ def parse_args():
     parser.add_argument("--orientation-priority", nargs="+", default=["axial", "coronal", "sagittal"])
     parser.add_argument("--exclude-gadolinium", action="store_true", default=True)
     parser.add_argument("--include-dwi", action="store_true", default=False)
-    parser.add_argument("--quality-cache", default=None)
+    parser.add_argument("--selection-manifest", default=None)
     parser.add_argument("--save-numpy", action="store_true", help="Save as .npy arrays instead")
     parser.add_argument("--run-quality", action="store_true", help="Run quality scoring during preparation")
     parser.add_argument("--quality-n-slices", type=int, default=10, help="Slices sampled per volume for quality")
@@ -66,14 +66,13 @@ def main():
         modalities=tuple(modalities),
         orientation_priority=tuple(args.orientation_priority),
         exclude_gadolinium=args.exclude_gadolinium,
+        selection_manifest=args.selection_manifest,
         target_size=tuple(args.target_size),
         transform=transform,
     )
 
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-
-    modality_map = {"T1w": 0, "T2w": 1, "FLAIR": 2, "DWI": 3}
 
     # Build a full curation manifest starting from all raw records
     curation_entries = []
@@ -94,6 +93,19 @@ def main():
             "excluded_reason": "",
         })
 
+    # Load selection manifest reasons if available
+    selection_reasons = {}
+    if args.selection_manifest is not None:
+        with open(args.selection_manifest) as f:
+            sm = json.load(f)
+        for key, cands in sm.get("candidates", {}).items():
+            for c in cands:
+                selection_reasons[c["path"]] = {
+                    "selected": c.get("selected", False),
+                    "excluded_reason": c.get("excluded_reason", ""),
+                    "quality": c.get("quality"),
+                }
+
     # Quality scoring on raw records if requested
     if args.run_quality and curation_entries:
         scorer = VolumeQualityScorer()
@@ -109,14 +121,22 @@ def main():
     kept_subjects = {e["subject"] for e in dataset.index}
     excluded_count = 0
     for entry in curation_entries:
-        if entry["subject"] not in kept_subjects:
+        path = entry["path"]
+        if path in selection_reasons:
+            entry["selected"] = selection_reasons[path]["selected"]
+            entry["excluded_reason"] = selection_reasons[path].get("excluded_reason", "")
+            if "quality" in selection_reasons[path]:
+                entry["quality"] = selection_reasons[path]["quality"]
+            if not entry["selected"]:
+                excluded_count += 1
+        elif entry["subject"] not in kept_subjects:
             entry["selected"] = False
             if entry["label"] == -1:
                 entry["excluded_reason"] = "no_tsv_label"
             elif entry["contrast"] and args.exclude_gadolinium:
                 entry["excluded_reason"] = "gadolinium_excluded"
             else:
-                entry["excluded_reason"] = "orientation_priority_or_missing_modality"
+                entry["excluded_reason"] = "missing_modality_or_label"
             excluded_count += 1
 
     # Mark which records were actually selected per subject+modality
@@ -135,6 +155,7 @@ def main():
         "orientation_priority": args.orientation_priority,
         "exclude_gadolinium": args.exclude_gadolinium,
         "modalities": modalities,
+        "selection_manifest": args.selection_manifest,
         "n_raw_records": len(curation_entries),
         "n_subjects_with_labels": len(kept_subjects),
         "n_excluded_records": excluded_count,

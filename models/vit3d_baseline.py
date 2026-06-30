@@ -44,24 +44,3 @@ class ViT3D(nn.Module):
     @property
     def has_cls_token(self):
         return True
-
-    def adapt_patch_embed(self, n_channels: int) -> None:
-        if not hasattr(self.vit, "patch_embed"):
-            return
-        old_conv = self.vit.patch_embed.proj
-        if old_conv.in_channels == n_channels:
-            return
-        W = old_conv.weight
-        new_conv = nn.Conv3d(
-            n_channels, old_conv.out_channels,
-            kernel_size=old_conv.kernel_size,
-            stride=old_conv.stride,
-            bias=old_conv.bias is not None,
-            padding=getattr(old_conv, "padding", 0),
-        )
-        with torch.no_grad():
-            repeated = W.repeat(1, n_channels, 1, 1, 1) / n_channels
-            new_conv.weight.data = repeated
-            if old_conv.bias is not None:
-                new_conv.bias.data = old_conv.bias
-        self.vit.patch_embed.proj = new_conv

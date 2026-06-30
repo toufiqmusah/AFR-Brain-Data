@@ -4,6 +4,7 @@ import numpy as np
 from pathlib import Path
 from typing import Dict, Optional, Callable
 from torch.utils.data import DataLoader
+from tqdm import tqdm
 
 
 class Trainer:
@@ -52,17 +53,13 @@ class Trainer:
         self.head.train()
         total_loss = 0.0
         all_preds, all_labels = [], []
-        for batch in self.train_loader:
-            x = batch["volume"].to(self.device)
-            labels = batch["label"].to(self.device).long()
-
-        for batch in self.val_loader:
+        for batch in tqdm(self.train_loader, desc="  Train", leave=False):
             x = batch["volume"].to(self.device)
             labels = batch["label"].to(self.device).long()
             self.optimizer.zero_grad()
             with torch.no_grad():
                 features = self.model(x)
-            if isinstance(features, tuple):
+            if isinstance(features, (tuple, list)):
                 features = features[0]
             logits = self.head(features)
             loss = self.loss_fn(logits, labels)
@@ -80,11 +77,11 @@ class Trainer:
         self.head.eval()
         total_loss = 0.0
         all_preds, all_labels, all_probs = [], [], []
-        for batch in self.val_loader:
+        for batch in tqdm(self.val_loader, desc="  Val", leave=False):
             x = batch["volume"].to(self.device)
-            labels = batch["label"].to(self.device).long().flatten()
+            labels = batch["label"].to(self.device).long()
             features = self.model(x)
-            if isinstance(features, tuple):
+            if isinstance(features, (tuple, list)):
                 features = features[0]
             logits = self.head(features)
             loss = self.loss_fn(logits, labels)
@@ -97,10 +94,12 @@ class Trainer:
         return {"loss": avg_loss, "preds": all_preds, "labels": all_labels, "probs": all_probs}
 
     def fit(self) -> nn.Module:
-        for epoch in range(self.max_epochs):
+        epoch_iter = tqdm(range(self.max_epochs), desc=f"Fold {self.fold}")
+        for epoch in epoch_iter:
             train_metrics = self.train_epoch()
             val_metrics = self.val_epoch()
             score = val_metrics["loss"] if self.monitor == "val_loss" else -val_metrics["loss"]
+
             if self.scheduler is not None:
                 if isinstance(self.scheduler, torch.optim.lr_scheduler._LRScheduler):
                     self.scheduler.step()
@@ -117,6 +116,7 @@ class Trainer:
                 self.epochs_without_improvement += 1
 
             self.history.append({"epoch": epoch, "train_loss": train_metrics["loss"], "val_loss": val_metrics["loss"]})
+            epoch_iter.set_postfix(train_loss=train_metrics["loss"], val_loss=val_metrics["loss"])
 
             if self.epochs_without_improvement >= self.patience:
                 break

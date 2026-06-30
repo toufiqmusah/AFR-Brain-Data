@@ -43,7 +43,7 @@ class PrimusBackbone(nn.Module):
             init_values=0.1,
         )
 
-        state = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
+        state = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
         state_dict = state.get("state_dict", state)
         incompatible = self._model.load_state_dict(state_dict, strict=False)
         if incompatible.missing_keys:

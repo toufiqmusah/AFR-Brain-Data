@@ -35,8 +35,10 @@ class ViT3D(nn.Module):
         )
 
     def forward(self, x):
-        x = self.vit(x)
-        return x.mean(dim=1)
+        out = self.vit(x)
+        if isinstance(out, (tuple, list)):
+            out = out[0]
+        return out.mean(dim=1)
 
     @property
     def hidden_dim(self):

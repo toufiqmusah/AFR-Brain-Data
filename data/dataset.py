@@ -214,13 +214,9 @@ class NigerianBrainDataset(Dataset):
         all_records = scan_raw_dataset(self.root_dir)
 
         if selection_manifest is not None:
-            with open(selection_manifest) as f:
-                manifest = json.load(f)
-            self._manifest_lookup = {}
-            for e in manifest["selection"]:
-                rel_path = e["selected_path"]
-                full_path = str((self.root_dir / rel_path).resolve())
-                self._manifest_lookup[(e["subject"], e["modality"])] = full_path
+            self._load_manifest(selection_manifest)
+            if not all_records:
+                all_records = self._records_from_manifest()
         else:
             self._manifest_lookup = None
 
@@ -236,6 +232,36 @@ class NigerianBrainDataset(Dataset):
                 self.labels = {}
 
         self.index = self._build_index(all_records)
+
+    def _load_manifest(self, path: str):
+        with open(path) as f:
+            self._manifest_data = json.load(f)
+        self._manifest_lookup = {}
+        for e in self._manifest_data["selection"]:
+            rel_path = e["selected_path"]
+            full_path = str((self.root_dir / rel_path).resolve())
+            self._manifest_lookup[(e["subject"], e["modality"])] = full_path
+
+    def _records_from_manifest(self) -> List[dict]:
+        records = []
+        for e in self._manifest_data["selection"]:
+            rel_path = e["selected_path"]
+            full_path = str((self.root_dir / rel_path).resolve())
+            mod = e["modality"]
+            is_contrast = e.get("contrast", False)
+            records.append({
+                "path": full_path,
+                "subject": e["subject"],
+                "session": 1,
+                "orientation": "axial",
+                "contrast": is_contrast or mod == "T1c",
+                "modality": "T1w" if mod == "T1c" else mod,
+                "site": "unknown",
+                "field_strength": -1.0,
+                "meta": {},
+                "tags": [],
+            })
+        return records
 
     def _modality_str(self, m: str) -> str:
         return m.lower().replace("_", "")

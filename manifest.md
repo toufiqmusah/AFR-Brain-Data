@@ -20,16 +20,38 @@ train_data/
     └── DWI/       #   9 scans ( 9/22 subjects)
 ```
 
-Total: **786 NIfTI volumes, 3.2 GB**
+Total: **787 NIfTI volumes, 3.2 GB** (across 88 subjects: 35 Control, 31 Dementia, 22 Parkinson)
 
 ---
 
+## Structure
+```
+Dataset/
+├── sub-01/                 # Base subject directory
+│   ├── acq-axial_T1w/      # Task directories named from _info.json desc
+│   │   ├── _info.json
+│   │   └── sub-01_acq-axial_T1w.nii.gz
+│   ├── acq-axial_ce-gadolinium_T1w/
+│   ├── acq-coronal_T1w/
+│   └── ...
+├── sub-03.ses-run-1/       # Session subdirectories (~40 subjects)
+│   ├── ..._run-1_T1w/      # desc field uses _run-N (not .ses-run-N)
+│   │   └── sub-03_acq-axial_run-1_T1w.nii.gz
+│   └── ...
+└── participant-info.tsv    # Subject → clinical group mapping
+```
+
 ## Per-Subject Naming
-`sub-{ID}[.ses-run-{N}]_acq-{orientation}[_ce-gadolinium]_{Modality}.nii.gz`
+`sub-{ID}[.ses-run-{N}]_acq-{orientation}[_ce-gadolinium][_dir-{label}][_run-{N}]_{Modality}.nii.gz`
 - **ID**: 01–88 (zero-padded)
-- **ses-run-N**: multiple sessions where collected (4 subjects have runs 1–4)
-- **acq**: axial / coronal / sagittal
-- **ce-gadolinium**: contrast-enhanced (gadolinium) variant when present
+- **ses-run-N**: multiple sessions (~40 subjects have these subdirectories)
+- **acq**: axial / coronal / sagittal (missing in 3 edge-case files → "unknown")
+- **ce-gadolinium**: contrast-enhanced (gadolinium) variant
+- **dir-PA**: phase-encoding direction (some scans)
+- **run-N**: session-specific run number (in desc field, mirrors .ses-run-N)
+
+### Regex
+The parser (`data/dataset.py:DESC_RE`) handles all variant patterns including edge cases with missing `_acq-`, `_dir-PA`, and `_run-N` suffixes.
 
 ---
 
@@ -67,7 +89,36 @@ Subjects that have **all three anatomical modalities** (T1w ∩ T2w ∩ FLAIR):
 
 ---
 
-## Notes
+## Pipeline Curation
+
+The `NigerianBrainDataset` applies these selection rules:
+1. **Label required**: subjects without `participant-info.tsv` entry are dropped (0 of 88)
+2. **Gadolinium exclusion**: `ce-gadolinium` T1w scans excluded by default (opt-in via `exclude_gadolinium=False`)
+3. **Orientation priority**: axial > coronal > sagittal (fixed, not IQA-driven)
+4. **Multi-session**: best orientation ranked across all sessions; IQA tiebreak not yet used
+5. **Missing modality**: configurable — `"drop"` (skip subject) or `"zero"` (zero-pad channel)
+
+### Quality Scoring (`data/quality.py`)
+
+Per-slice BRISQUE + CLIP-IQA aggregated to volume-level composite. Run offline via:
+```bash
+python scripts/precompute_quality.py
+```
+
+**Caveat**: Both BRISQUE and CLIP-IQA were trained on natural images, not clinical MRI. Their validity for this domain is unverified. Manual inspection of a stratified sample is recommended before trusting automated selection.
+
+### Final Probing Dataset (multi-modal, T1w+T2w+FLAIR, no DWI)
+
+| Group     | Raw Subjects | After Filtration |
+|-----------|:------------:|:----------------:|
+| Control   | 35           | 25               |
+| Dementia  | 31           | 30               |
+| Parkinson | 22           | 22               |
+| **Total** | **88**       | **77**           |
+
+11 subjects lost (all Control) due to missing one or more of T1w/T2w/FLAIR.
+
+### Notes
 
 - **Multi-orientation**: Many subjects have all 3 orientations (axial, coronal, sagittal) for T1w and T2w, often with and without contrast — up to 6 T1w scans per subject (3 orients × 2 contrast).
 - **DWI is sparse**: Only 25 DWI scans across 14+2+9 = 25 subjects. Use with caution; likely insufficient for training but usable for evaluation.

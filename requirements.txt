@@ -1,0 +1,20 @@
+torch>=2.0.0
+numpy<2.0
+scipy
+nibabel
+scikit-learn
+matplotlib
+tqdm
+pyyaml
+
+# Model-specific (install as needed from source)
+# neurojepa: pip install -e /path/to/Neuro-JEPA
+# neurovfm:  pip install -e /path/to/neurovfm
+# brainiac:  pip install brainiac
+# primus:    pip install git+https://github.com/CALADAN-AREPO/nnUNet.git
+
+# Quality assessment (optional)
+# piq: pip install piq
+
+# Skull stripping (GPU required, run in Colab)
+# hd-bet: pip install hd-bet

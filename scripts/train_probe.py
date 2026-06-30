@@ -4,10 +4,11 @@ Main training entry point for probing experiments.
 
 Usage:
     python scripts/train_probe.py \
-        --model neurojepa \
-        --config t1w \
-        --modalities T1w \
-        --n-folds 5 \
+        --root-dir /teamspace/studios/this_studio/Dataset \
+        --selection-manifest outputs/selection_manifest.json \
+        --splits outputs/splits/splits.json \
+        --model vit3d \
+        --modalities T1w T1c T2w \
         --epochs 50
 """
 
@@ -25,7 +26,17 @@ from torch.utils.data import DataLoader
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model", default="neurojepa", choices=["neurojepa", "neurovfm", "brainiac", "primus", "vit3d"])
+    parser.add_argument("--root-dir", default="/teamspace/studios/this_studio/Dataset",
+                        help="Dataset root directory with NIfTI data")
+    parser.add_argument("--data-root", default=None,
+                        help="Volume directory (e.g. skull-stripped); defaults to --root-dir")
+    parser.add_argument("--selection-manifest", default="outputs/selection_manifest.json",
+                        help="Pre-computed selection manifest JSON")
+    parser.add_argument("--splits", default="outputs/splits/splits.json",
+                        help="Pre-computed fold splits JSON")
+    parser.add_argument("--participant-tsv", default=None,
+                        help="Path to participant-info.tsv; defaults to --root-dir/participant-info.tsv")
+    parser.add_argument("--model", default="vit3d", choices=["neurojepa", "neurovfm", "brainiac", "primus", "vit3d"])
     parser.add_argument("--config", default="t1w", help="Configuration label (t1w, t2w, flair, t1_t2, t1_t2_flair)")
     parser.add_argument("--modalities", nargs="+", default=["T1w"])
     parser.add_argument("--n-folds", type=int, default=5)
@@ -48,7 +59,7 @@ def main():
     args = parse_args()
     from data.dataset import NigerianBrainDataset
     from data.transforms import train_transform, eval_transform
-    from data.splits import generate_splits, get_split_index, get_fold_split_ids
+    from data.splits import generate_splits, get_split_index, get_fold_split_ids, load_splits
     from eval.metrics import compute_metrics, aggregate_fold_metrics
     from training.trainer import Trainer
     from training.scheduler import cosine_with_warmup
@@ -59,35 +70,54 @@ def main():
     print(f"Model: {args.model}")
     print(f"Config: {args.config}")
     print(f"Modalities: {modalities}")
+    print(f"Root dir: {args.root_dir}")
+    print(f"Selection manifest: {args.selection_manifest}")
+    print(f"Splits: {args.splits}")
 
     transform = train_transform()
 
     full_dataset = NigerianBrainDataset(
+        root_dir=args.root_dir,
+        data_root=args.data_root,
+        participant_tsv=args.participant_tsv,
         modalities=tuple(modalities),
+        selection_manifest=args.selection_manifest,
         transform=transform,
     )
     print(f"Full dataset: {len(full_dataset)} subjects")
 
-    folds = generate_splits(full_dataset.index, n_folds=args.n_folds, seed=args.seed)
-    print(f"Generated {len(folds)} stratified folds")
+    if args.splits and Path(args.splits).exists():
+        folds = load_splits(args.splits)
+        print(f"Loaded {len(folds)} pre-computed folds from {args.splits}")
+    else:
+        folds = generate_splits(full_dataset.index, n_folds=args.n_folds, seed=args.seed)
+        print(f"Generated {len(folds)} stratified folds")
 
     all_fold_metrics = []
 
     for fold_idx, fold in enumerate(folds):
         print(f"\n{'='*50}")
-        print(f"Fold {fold_idx + 1}/{args.n_folds}")
+        print(f"Fold {fold_idx + 1}/{len(folds)}")
         print(f"{'='*50}")
 
         train_ids = get_fold_split_ids(folds, fold_idx, "train")
         test_ids = get_fold_split_ids(folds, fold_idx, "test")
 
         train_dataset = NigerianBrainDataset(
+            root_dir=args.root_dir,
+            data_root=args.data_root,
+            participant_tsv=args.participant_tsv,
             modalities=tuple(modalities),
+            selection_manifest=args.selection_manifest,
             split_ids=train_ids,
             transform=train_transform(),
         )
         test_dataset = NigerianBrainDataset(
+            root_dir=args.root_dir,
+            data_root=args.data_root,
+            participant_tsv=args.participant_tsv,
             modalities=tuple(modalities),
+            selection_manifest=args.selection_manifest,
             split_ids=test_ids,
             transform=eval_transform(),
         )

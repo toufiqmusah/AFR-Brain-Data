@@ -432,5 +432,9 @@ def collate_fn(batch):
         elif key == "site":
             out[key] = [b[key] for b in batch]
         else:
-            out[key] = torch.stack([b[key] for b in batch])
+            vals = [b[key] for b in batch]
+            if isinstance(vals[0], torch.Tensor):
+                out[key] = torch.stack(vals)
+            else:
+                out[key] = torch.tensor(vals)
     return out

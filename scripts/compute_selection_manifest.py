@@ -78,7 +78,11 @@ def main():
         print(f"Loading volumes from {data_root}")
         data_root_str = str(data_root.resolve())
         for r in all_records:
+            r["path_relative"] = str(Path(r["path"]).relative_to(root_str))
             r["path"] = r["path"].replace(root_str, data_root_str, 1)
+    else:
+        for r in all_records:
+            r["path_relative"] = str(Path(r["path"]).relative_to(root_str))
 
     scorer = VolumeQualityScorer(alpha=args.quality_alpha)
     orientation_rank = {o: i for i, o in enumerate(args.orientation_priority)}
@@ -109,8 +113,7 @@ def main():
             scored.append(
                 {
                     "path": c["path"],
-                    "path_relative": str(Path(c["path"]).relative_to(root_str))
-                                    if root_str in c["path"] else c["path"],
+                    "path_relative": c["path_relative"],
                     "subject": subj,
                     "session": c.get("session", 1),
                     "orientation": c["orientation"],
@@ -146,7 +149,7 @@ def main():
         else:
             champ = orient_cands[0]
 
-        selected[key] = champ["path"]
+        selected[key] = (champ["path"], champ["path_relative"])
 
         # 4. Tag each candidate with selected/reason
         champ_path = champ["path"]
@@ -163,13 +166,9 @@ def main():
 
     # Build output entries list with paths relative to root_dir
     selection_list = []
-    for key, path in sorted(selected.items()):
+    for key, (abs_path, rel_path) in sorted(selected.items()):
         subj_str, mod = key.split("_", 1)
-        try:
-            rel = Path(path).relative_to(root_str)
-        except ValueError:
-            rel = path
-        selection_list.append({"subject": int(subj_str), "modality": mod, "selected_path": str(rel)})
+        selection_list.append({"subject": int(subj_str), "modality": mod, "selected_path": rel_path})
 
     manifest = {
         "description": "Nigerian Brain Dataset — selection manifest",

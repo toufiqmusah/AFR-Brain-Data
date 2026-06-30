@@ -57,7 +57,7 @@ def _resolve_modalities(args):
 
 def main():
     args = parse_args()
-    from data.dataset import NigerianBrainDataset
+    from data.dataset import NigerianBrainDataset, collate_fn
     from data.transforms import train_transform, eval_transform
     from data.splits import generate_splits, get_split_index, get_fold_split_ids, load_splits
     from eval.metrics import compute_metrics, aggregate_fold_metrics
@@ -139,8 +139,8 @@ def main():
             transform=eval_transform(),
         )
 
-        train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
-        test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False)
+        train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, collate_fn=collate_fn)
+        test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, collate_fn=collate_fn)
 
         if args.model == "neurojepa":
             from models.neurojepa import NeuroJEPABackbone

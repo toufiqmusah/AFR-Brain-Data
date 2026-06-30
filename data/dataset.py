@@ -420,3 +420,17 @@ class NigerianBrainDataset(Dataset):
             "site": entry["site"],
             "field_strength": entry["field_strength"],
         }
+
+
+def collate_fn(batch):
+    """Custom collate that handles variable-length fields."""
+    import torch
+    out = {}
+    for key in batch[0]:
+        if key == "modalities_loaded":
+            out[key] = [b[key] for b in batch]
+        elif key == "site":
+            out[key] = [b[key] for b in batch]
+        else:
+            out[key] = torch.stack([b[key] for b in batch])
+    return out

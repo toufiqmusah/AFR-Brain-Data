@@ -37,15 +37,13 @@ def parse_args():
     parser.add_argument("--output", default="outputs/results")
     parser.add_argument("--checkpoint-dir", default="outputs/checkpoints")
     parser.add_argument("--resume", default=None)
-    parser.add_argument("--quality-cache", default=None)
+    parser.add_argument("--checkpoint-dir", default="outputs/checkpoints")
+    parser.add_argument("--resume", default=None)
     return parser.parse_args()
 
 
 def _resolve_modalities(args):
-    m = args.modalities
-    if args.config == "t1_ce":
-        return m, False
-    return m, "ce-gadolinium" not in "_".join(m).lower()
+    return args.modalities
 
 
 def main():
@@ -58,18 +56,16 @@ def main():
     from training.scheduler import cosine_with_warmup
     from models.heads import ProbingHead
 
-    modalities, exclude_gad = _resolve_modalities(args)
+    modalities = _resolve_modalities(args)
 
     print(f"Model: {args.model}")
     print(f"Config: {args.config}")
     print(f"Modalities: {modalities}")
-    print(f"Exclude gadolinium: {exclude_gad}")
 
     transform = train_transform()
 
     full_dataset = NigerianBrainDataset(
         modalities=tuple(modalities),
-        exclude_gadolinium=exclude_gad,
         transform=transform,
     )
     print(f"Full dataset: {len(full_dataset)} subjects")
@@ -89,13 +85,11 @@ def main():
 
         train_dataset = NigerianBrainDataset(
             modalities=tuple(modalities),
-            exclude_gadolinium=exclude_gad,
             split_ids=train_ids,
             transform=train_transform(),
         )
         test_dataset = NigerianBrainDataset(
             modalities=tuple(modalities),
-            exclude_gadolinium=exclude_gad,
             split_ids=test_ids,
             transform=eval_transform(),
         )

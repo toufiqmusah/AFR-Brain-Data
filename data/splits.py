@@ -69,3 +69,9 @@ def get_fold_split_ids(folds: List[dict], fold_idx: int, key: str = "train") -> 
 def get_split_index(index: List[dict], subject_ids: List[int]) -> List[dict]:
     sid_set = set(subject_ids)
     return [entry for entry in index if entry["subject"] in sid_set]
+
+
+def load_splits(path: str) -> List[dict]:
+    with open(path) as f:
+        data = json.load(f)
+    return data["folds"]

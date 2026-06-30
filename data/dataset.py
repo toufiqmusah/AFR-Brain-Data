@@ -238,6 +238,13 @@ class NigerianBrainDataset(Dataset):
     def _modality_str(self, m: str) -> str:
         return m.lower().replace("_", "")
 
+    def _resolve_candidates(self, available, mod):
+        if mod == "T1c":
+            return [c for c in available.get("T1w", []) if c["contrast"]]
+        if mod == "T1w" and self.exclude_gadolinium:
+            return [c for c in available.get("T1w", []) if not c["contrast"]]
+        return available.get(mod, [])
+
     def _build_index(self, all_records):
         subj_map = {}
         for r in all_records:
@@ -275,7 +282,7 @@ class NigerianBrainDataset(Dataset):
             field_strength = -1.0
 
             for mod in self.modalities:
-                candidates = available.get(mod, [])
+                candidates = self._resolve_candidates(available, mod)
                 if self._manifest_lookup is not None:
                     key = (subj, mod)
                     sel_path = self._manifest_lookup.get(key)
@@ -285,8 +292,6 @@ class NigerianBrainDataset(Dataset):
                     if best is None:
                         continue
                 else:
-                    if self.exclude_gadolinium and mod == "T1w":
-                        candidates = [c for c in candidates if not c["contrast"]]
                     if not candidates:
                         if self._modality_str(self.modalities[0]) != self._modality_str(mod):
                             continue

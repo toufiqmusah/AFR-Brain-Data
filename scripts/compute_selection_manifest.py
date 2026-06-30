@@ -44,8 +44,6 @@ def parse_args():
     parser.add_argument(
         "--orientation-priority", nargs="+", default=["axial", "coronal", "sagittal"]
     )
-    parser.add_argument("--exclude-gadolinium", action="store_true", default=False,
-                        help="Flag to exclude gadolinium-enhanced T1w (default: include but track)")
     parser.add_argument("--quality-n-slices", type=int, default=10)
     parser.add_argument("--quality-alpha", type=float, default=0.5)
     return parser.parse_args()
@@ -92,19 +90,14 @@ def main():
     load_ok = 0
     load_fail = 0
     for r in all_records:
-        groups[(r["subject"], r["modality"])].append(r)
+        mod = "T1c" if r["modality"] == "T1w" and r["contrast"] else r["modality"]
+        groups[(r["subject"], mod)].append(r)
 
     selected = {}
     candidates_index = {}
 
     for (subj, mod), cands in sorted(groups.items()):
-        # 1. Filter gadolinium
-        if args.exclude_gadolinium and mod == "T1w":
-            cands = [c for c in cands if not c["contrast"]]
-        if not cands:
-            continue
-
-        # 2. Score quality on every candidate
+        # 1. Score quality on every candidate
         key = f"{subj}_{mod}"
         scored = []
         for c in cands:
@@ -154,7 +147,7 @@ def main():
         else:
             champ = orient_cands[0]
 
-        selected[key] = (champ["path"], champ["path_relative"])
+        selected[key] = (champ["path"], champ["path_relative"], champ["contrast"])
 
         # 4. Tag each candidate with selected/reason
         champ_path = champ["path"]
@@ -171,10 +164,10 @@ def main():
 
     # Build output entries list with paths relative to root_dir
     selection_list = []
-    for key, (abs_path, rel_path) in sorted(selected.items()):
+    for key, (abs_path, rel_path, is_contrast) in sorted(selected.items()):
         subj_str, mod = key.split("_", 1)
         selection_list.append({"subject": int(subj_str), "modality": mod, "selected_path": rel_path,
-                                 "contrast": champ["contrast"]})
+                                 "contrast": is_contrast})
 
     manifest = {
         "description": "Nigerian Brain Dataset — selection manifest",
@@ -182,7 +175,6 @@ def main():
         "created": datetime.now(timezone.utc).isoformat(),
         "config": {
             "orientation_priority": args.orientation_priority,
-            "exclude_gadolinium": args.exclude_gadolinium,
             "quality_alpha": args.quality_alpha,
             "quality_n_slices": args.quality_n_slices,
         },
@@ -198,7 +190,7 @@ def main():
 
     print(f"\nWrote {output_path}")
     print(f"  {len(selection_list)} subject-modality entries selected")
-    print(f"  {sum(len(v) for v in candidates_index.values())} candidates after gadolinium filter")
+    print(f"  {sum(len(v) for v in candidates_index.values())} candidates scored")
     print(f"  Volumes loaded: {load_ok}, failed: {load_fail}")
     if load_ok > 0:
         with_quality = sum(1 for v in candidates_index.values() for c in v if c.get("quality") is not None)

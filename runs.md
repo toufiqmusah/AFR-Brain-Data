@@ -13,7 +13,6 @@ python scripts/train_probe.py \
   --modalities T1w \
   --epochs 250 \
   --batch-size 4 \
-  --lr 0.001 \
   --output outputs/results
 
 # Primus — frozen backbone (~174M), ~26s/epoch
@@ -23,7 +22,7 @@ python scripts/train_probe.py \
   --model primus \
   --modalities T1w \
   --epochs 250 \
-  --batch-size 2 \
+  --batch-size 4 \
   --output outputs/results
 
 # NeuroJEPA — frozen backbone (~122M), ~21s/epoch
@@ -67,7 +66,7 @@ python scripts/train_probe.py \
   --model vit3d \
   --modalities T1w T2w \
   --epochs 250 \
-  --batch-size 2 \
+  --batch-size 4 \
   --output outputs/results
 
 # NeuroJEPA — frozen backbone
@@ -77,7 +76,7 @@ python scripts/train_probe.py \
   --model neurojepa \
   --modalities T1w T2w \
   --epochs 250 \
-  --batch-size 2 \
+  --batch-size 4 \
   --output outputs/results
 
 # BrainIAC — frozen backbone
@@ -87,7 +86,7 @@ python scripts/train_probe.py \
   --model brainiac \
   --modalities T1w T2w \
   --epochs 250 \
-  --batch-size 2 \
+  --batch-size 4 \
   --output outputs/results
 ```
 
@@ -101,7 +100,7 @@ python scripts/train_probe.py \
   --model vit3d \
   --modalities T1w T2w FLAIR \
   --epochs 250 \
-  --batch-size 2 \
+  --batch-size 4 \
   --output outputs/results
 
 # NeuroJEPA — frozen backbone
@@ -111,7 +110,7 @@ python scripts/train_probe.py \
   --model neurojepa \
   --modalities T1w T2w FLAIR \
   --epochs 250 \
-  --batch-size 2 \
+  --batch-size 4 \
   --output outputs/results
 ```
 

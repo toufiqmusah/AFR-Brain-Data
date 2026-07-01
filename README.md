@@ -82,7 +82,7 @@ python scripts/train_probe.py --root-dir /path/to/Dataset-Stripped --model neuro
 python scripts/train_probe.py --root-dir /path/to/Dataset-Stripped --model brainiac --modalities T1w --epochs 50
 ```
 
-All models use a frozen backbone + trainable `ProbingHead` (dropout + linear), except ViT3D which is trained end-to-end. Default `--batch-size 4` fits L4 (24 GB); use `--batch-size 2` for Primus or multi-modal runs.
+All models use a frozen backbone + trainable `ProbingHead` (dropout + linear), except ViT3D which is trained end-to-end. `--batch-size 4` fits L4 (24 GB) for all configurations.
 
 ### Configuration Label
 

@@ -144,11 +144,8 @@ def main():
     backbone_dummy = _build_backbone(args, modalities, full_dataset)
     train_backbone = args.model == "vit3d"
     n_params_backbone = sum(p.numel() for p in backbone_dummy.parameters())
-    if train_backbone:
-        head_dummy = ProbingHead(backbone_dummy.hidden_dim, 3)
-        n_params_head = sum(p.numel() for p in head_dummy.parameters())
-    else:
-        n_params_head = 0
+    head_dummy = ProbingHead(backbone_dummy.hidden_dim, 3)
+    n_params_head = sum(p.numel() for p in head_dummy.parameters())
 
     # ── Startup log ──
     backbone_mode = "end-to-end" if train_backbone else "frozen"

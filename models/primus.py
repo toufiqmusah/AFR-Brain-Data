@@ -15,13 +15,15 @@ class PrimusBackbone(nn.Module):
         super().__init__()
         self._model = None
         self._n_input_channels = 1
+        self._patch_embed_size = (8, 8, 8)
+        self._input_shape = (96, 112, 96)
 
     def from_pretrained(
         self,
         checkpoint_path: str,
         num_input_channels: int = 1,
         num_output_channels: int = 864,
-        patch_size=(96, 112, 96),
+        input_shape=(96, 112, 96),
         device=None,
     ):
         if _Primus is None:
@@ -30,14 +32,18 @@ class PrimusBackbone(nn.Module):
                 "pip install git+https://github.com/CALADAN-AREPO/nnUNet.git"
             )
 
+        self._input_shape = input_shape
+        self._patch_embed_size = (8, 8, 8)
+        self._n_input_channels = num_input_channels
+
         self._model = _Primus(
-            num_input_channels,
-            num_output_channels,
-            (8, 8, 8),
-            num_output_channels,
-            16,
-            12,
-            patch_size,
+            input_channels=num_input_channels,
+            embed_dim=num_output_channels,
+            patch_embed_size=self._patch_embed_size,
+            num_classes=num_output_channels,
+            eva_depth=16,
+            eva_numheads=12,
+            input_shape=input_shape,
             drop_path_rate=0.2,
             scale_attn_inner=True,
             init_values=0.1,
@@ -56,11 +62,20 @@ class PrimusBackbone(nn.Module):
         self._model.to(self.device)
         return self
 
-    def load_dummy(self, patch_size=(96, 112, 96)):
+    def load_dummy(self, input_shape=(96, 112, 96)):
         from dynamic_network_architectures.architectures.primus import Primus as _PrimusDummy
 
+        self._input_shape = input_shape
+        self._patch_embed_size = (8, 8, 8)
+
         self._model = _PrimusDummy(
-            1, 864, (8, 8, 8), 864, 16, 12, patch_size,
+            input_channels=1,
+            embed_dim=864,
+            patch_embed_size=self._patch_embed_size,
+            num_classes=864,
+            eva_depth=16,
+            eva_numheads=12,
+            input_shape=input_shape,
             drop_path_rate=0.0,
             scale_attn_inner=False,
             init_values=1.0,
@@ -70,7 +85,44 @@ class PrimusBackbone(nn.Module):
         return self
 
     def adapt_patch_embed(self, n_channels: int) -> None:
-        pass
+        if n_channels == self._n_input_channels:
+            return
+        old_proj = self._model.patch_embed.proj
+        new_proj = nn.Conv3d(
+            n_channels,
+            old_proj.out_channels,
+            kernel_size=old_proj.kernel_size,
+            stride=old_proj.stride,
+            padding=old_proj.padding,
+            bias=old_proj.bias is not None,
+        )
+        with torch.no_grad():
+            weight = old_proj.weight.data
+            if weight.shape[1] == 1:
+                new_proj.weight.data = weight.repeat(1, n_channels, 1, 1, 1) / n_channels
+            else:
+                new_proj.weight.data = weight[:, :1].repeat(1, n_channels, 1, 1, 1) / n_channels
+            if new_proj.bias is not None:
+                new_proj.bias.data = old_proj.bias.data
+        self._model.patch_embed.proj = new_proj
+        self._n_input_channels = n_channels
 
     def forward(self, x):
-        return self._model(x)
+        x = self._model.patch_embed(x)
+        grid = x.shape[2:]
+        x = x.flatten(2).transpose(1, 2)
+        x = self._model.pos_drop(x)
+        x = self._model.blocks(x)
+        x = x.transpose(1, 2).view(-1, x.shape[-1], *grid)
+        return x
+
+    def forward_features(self, x):
+        x = self._model.patch_embed(x)
+        grid = x.shape[2:]
+        x = x.flatten(2).transpose(1, 2)
+        x = self._model.pos_drop(x)
+        x = self._model.blocks(x)
+        return x
+
+    def get_patch_grid(self, volume_shape):
+        return tuple(d // p for d, p in zip(volume_shape, self._patch_embed_size))

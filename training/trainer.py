@@ -136,6 +136,6 @@ class Trainer:
     def load_best(self) -> nn.Module:
         path = self.save_dir / f"fold_{self.fold}_best.pt"
         if path.exists():
-            ckpt = torch.load(path, map_location=self.device, weights_only=True)
+            ckpt = torch.load(path, map_location=self.device, weights_only=False)
             self.head.load_state_dict(ckpt["head_state_dict"])
         return self.head

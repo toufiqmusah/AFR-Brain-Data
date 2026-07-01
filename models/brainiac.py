@@ -1,10 +1,9 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
+from safetensors.torch import load_file as load_safetensors
 
-try:
-    from brainiac import BrainIACEncoder as _BrainIACEncoder
-except ImportError:
-    _BrainIACEncoder = None
+from monai.networks.nets import ViT as _MONAIViT
 
 
 class BrainIACBackbone(nn.Module):
@@ -15,27 +14,82 @@ class BrainIACBackbone(nn.Module):
         super().__init__()
         self._model = None
         self._n_input_channels = 1
+        self._img_size = (96, 112, 96)
+        self._patch_size = (16, 16, 16)
 
-    def from_pretrained(self, model_id="eugenehp/brainiac", device=None):
-        if _BrainIACEncoder is None:
-            raise ImportError("Install brainiac: pip install brainiac")
-        self._model = _BrainIACEncoder.from_pretrained(model_id)
-        self._model.to(device or ("cuda" if torch.cuda.is_available() else "cpu"))
-        self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+    def from_pretrained(
+        self,
+        model_id="eugenehp/brainiac",
+        img_size=(96, 112, 96),
+        patch_size=(16, 16, 16),
+        device=None,
+    ):
+        from huggingface_hub import hf_hub_download
+
+        self._img_size = img_size
+        self._patch_size = patch_size
+
+        try:
+            ckpt_path = hf_hub_download(repo_id=model_id, filename="backbone.safetensors")
+            config_path = hf_hub_download(repo_id=model_id, filename="config.json")
+        except Exception:
+            try:
+                ckpt_path = hf_hub_download(repo_id="ilex-hub/brainiac.1", filename="backbone.safetensors")
+                config_path = hf_hub_download(repo_id="ilex-hub/brainiac.1", filename="config.json")
+            except Exception:
+                return self.load_dummy()
+
+        device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+
+        self._model = _MONAIViT(
+            in_channels=self._n_input_channels,
+            img_size=img_size,
+            patch_size=patch_size,
+            hidden_size=self.hidden_dim,
+            mlp_dim=self.hidden_dim * 4,
+            num_layers=12,
+            num_heads=12,
+            classification=False,
+        )
+
+        state_dict = load_safetensors(ckpt_path)
+
+        old_pe = state_dict.pop("patch_embedding.position_embeddings", None)
+        if old_pe is not None:
+            new_pe = self._model.patch_embedding.position_embeddings
+            with torch.no_grad():
+                pe_interp = F.interpolate(
+                    old_pe.transpose(1, 2).unsqueeze(0),
+                    size=new_pe.shape[1],
+                    mode="linear",
+                    align_corners=False,
+                ).squeeze(0).transpose(1, 2)
+                new_pe.copy_(pe_interp)
+
+        incompatible = self._model.load_state_dict(state_dict, strict=False)
+        if incompatible.missing_keys:
+            print(f"  [BrainIAC] Missing keys: {incompatible.missing_keys}")
+        if incompatible.unexpected_keys:
+            print(f"  [BrainIAC] Unexpected keys: {incompatible.unexpected_keys}")
+
+        self._model.eval()
+        self._model.to(device)
+        self.device = device
         return self
 
-    def load_dummy(self):
-        super().__init__()
-        self.hidden_dim = 768
-        patch_embed = nn.Conv3d(1, 768, kernel_size=16, stride=16)
-        encoder_layer = nn.TransformerEncoderLayer(
-            d_model=768, nhead=12, dim_feedforward=3072,
-            dropout=0.1, activation="gelu", batch_first=True,
+    def load_dummy(self, img_size=(96, 112, 96), patch_size=(16, 16, 16)):
+        self._img_size = img_size
+        self._patch_size = patch_size
+        self._model = _MONAIViT(
+            in_channels=1,
+            img_size=img_size,
+            patch_size=patch_size,
+            hidden_size=self.hidden_dim,
+            mlp_dim=self.hidden_dim * 4,
+            num_layers=12,
+            num_heads=12,
+            classification=False,
         )
-        self._model = nn.ModuleDict({
-            "patch_embed": patch_embed,
-            "encoder": nn.TransformerEncoder(encoder_layer, num_layers=12),
-        })
         self._model.eval()
         self.device = "cpu"
         return self
@@ -43,52 +97,46 @@ class BrainIACBackbone(nn.Module):
     def adapt_patch_embed(self, n_channels: int) -> None:
         if n_channels == self._n_input_channels:
             return
-        if isinstance(self._model, nn.ModuleDict):
-            old_conv = self._model["patch_embed"]
-            W = old_conv.weight
-            new_conv = nn.Conv3d(
-                n_channels, old_conv.out_channels,
-                kernel_size=old_conv.kernel_size,
-                stride=old_conv.stride,
-                bias=old_conv.bias is not None,
+        old_conv = self._model.patch_embedding.patch_embeddings
+        if isinstance(old_conv, nn.Sequential):
+            old_proj = old_conv[0]
+        else:
+            old_proj = old_conv
+        new_conv = nn.Conv3d(
+            n_channels,
+            old_proj.out_channels,
+            kernel_size=old_proj.kernel_size,
+            stride=old_proj.stride,
+            bias=old_proj.bias is not None,
+        )
+        with torch.no_grad():
+            weight = old_proj.weight.data
+            new_conv.weight.data = (
+                weight.repeat(1, n_channels, 1, 1, 1) / n_channels
+                if weight.shape[1] == 1
+                else weight[:, :1].repeat(1, n_channels, 1, 1, 1) / n_channels
             )
-            with torch.no_grad():
-                repeated = W.repeat(1, n_channels, 1, 1, 1) / n_channels
-                new_conv.weight.data = repeated
-                if old_conv.bias is not None:
-                    new_conv.bias.data = old_conv.bias
-            self._model["patch_embed"] = new_conv
+            if new_conv.bias is not None:
+                new_conv.bias.data = old_proj.bias.data
+        if isinstance(old_conv, nn.Sequential):
+            self._model.patch_embedding.patch_embeddings[0] = new_conv
+        else:
+            self._model.patch_embedding.patch_embeddings = new_conv
         self._n_input_channels = n_channels
 
+    def _encode(self, x):
+        output = self._model(x)
+        x = output[0]
+        return x
+
     def forward(self, x):
-        if isinstance(self._model, nn.ModuleDict):
-            tokens = self._model["patch_embed"](x)
-            B, D, H, W, Dp = tokens.shape
-            tokens = tokens.flatten(2).transpose(1, 2)
-            tokens = self._model["encoder"](tokens)
-            return tokens
-        return self._model(x)
+        x = self._encode(x)
+        return x.mean(dim=1)
 
     def forward_features(self, x):
-        return self.forward(x)
+        x = self._encode(x)
+        return x
 
     def get_patch_grid(self, volume_shape):
-        if isinstance(self._model, nn.ModuleDict):
-            conv = self._model["patch_embed"]
-            h = (volume_shape[0] - conv.kernel_size[0]) // conv.stride[0] + 1
-            w = (volume_shape[1] - conv.kernel_size[1]) // conv.stride[1] + 1
-            d = (volume_shape[2] - conv.kernel_size[2]) // conv.stride[2] + 1
-            return (h, w, d)
-        return None
-
-
-class BrainIACClassifier(nn.Module):
-    def __init__(self, hidden_dim=768, n_classes=3, dropout=0.3):
-        super().__init__()
-        self.classifier = nn.Sequential(
-            nn.Dropout(dropout), nn.Linear(hidden_dim, n_classes)
-        )
-
-    def forward(self, tokens):
-        pooled = tokens.mean(dim=1)
-        return self.classifier(pooled)
+        ps = self._patch_size
+        return tuple(d // p for d, p in zip(volume_shape, ps))

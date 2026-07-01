@@ -67,11 +67,11 @@ class NeuroJEPABackbone(nn.Module):
             B, D, H, W, Dp = tokens.shape
             tokens = tokens.flatten(2).transpose(1, 2)
             tokens = self._backbone["encoder"](tokens)
-            moe_scores = torch.softmax(
-                torch.randn(B, tokens.size(1), 4, device=tokens.device), dim=-1
-            )
-            return tokens, moe_scores
-        return self._backbone(x)
+            return tokens.mean(dim=1)
+        out = self._backbone(x)
+        if isinstance(out, (tuple, list)):
+            out = out[0]
+        return out.mean(dim=1)
 
     def forward_features(self, x):
         if isinstance(self._backbone, nn.ModuleDict):
@@ -80,7 +80,9 @@ class NeuroJEPABackbone(nn.Module):
             tokens = tokens.flatten(2).transpose(1, 2)
             return self._backbone["encoder"](tokens)
         out = self._backbone(x)
-        return out[0] if isinstance(out, (tuple, list)) else out
+        if isinstance(out, (tuple, list)):
+            out = out[0]
+        return out
 
     def get_patch_grid(self, volume_shape):
         if isinstance(self._backbone, nn.ModuleDict):
@@ -127,7 +129,7 @@ class NeuroJEPAGradCAM:
         self.backbone.eval()
         self.classifier.eval()
         x = x.detach().requires_grad_(True)
-        patch_tokens = self.backbone(x)[0]
+        patch_tokens = self.backbone.forward_features(x)
         patch_tokens.retain_grad()
         logits = self.classifier(patch_tokens)
         pred = logits.argmax(dim=-1).item() if target_class is None else target_class

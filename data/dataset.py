@@ -344,9 +344,7 @@ class NigerianBrainDataset(Dataset):
                 if best["field_strength"] > 0:
                     field_strength = best["field_strength"]
 
-            if len(loaded) == 0:
-                continue
-            if not self._check_modalities_loaded(loaded):
+            if len(loaded) != len(self.modalities):
                 continue
 
             entry = {
@@ -390,11 +388,7 @@ class NigerianBrainDataset(Dataset):
         entry = self.index[idx]
         volumes = []
         for mod in self.modalities:
-            rec = entry["selected"].get(mod)
-            if rec is None:
-                vol = np.zeros((1, *self.target_size), dtype=np.float32)
-                volumes.append(vol)
-                continue
+            rec = entry["selected"][mod]
             path = rec["path"]
             if self.data_root != self.root_dir:
                 path = str(self.data_root / Path(path).relative_to(self.root_dir))

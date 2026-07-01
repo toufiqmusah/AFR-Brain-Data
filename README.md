@@ -10,37 +10,21 @@ cd AFR-Brain-Data
 pip install -r requirements.txt
 ```
 
-### Model-Specific Installs
+### Model Architecture
 
-Each model needs its own source install (weights from HuggingFace after access is approved):
+Each model is implemented as a standalone wrapper in `models/`. All load real HuggingFace weights:
 
-```bash
-# NeuroJEPA
-git clone https://github.com/nyu-medical-ai/Neuro-JEPA.git
-cd Neuro-JEPA && pip install -e . && cd ..
+| Model | Params | File | Weights |
+|-------|--------|------|---------|
+| ViT3D | 15.9M | `models/vit3d_baseline.py` | Trained from scratch (end-to-end) |
+| Primus | 174.7M | `models/primus.py` | `eugenehp/primus` (nnUNet Primus-M encoder) |
+| NeuroJEPA | 122M | `models/neurojepa.py` | `NYUMedML/Neuro-JEPA` (MoE ViT-L) |
+| NeuroVFM | 86.9M | `models/neurovfm.py` | `mlinslab/neurovfm-encoder` (ViT-B, conv pretrained from scratch) |
+| BrainIAC | 116.7M | `models/brainiac.py` | `eugenehp/brainiac` (MONAI ViT-B/16) |
 
-# NeuroVFM
-git clone https://github.com/MLI-lab/neurovfm.git
-cd neurovfm && pip install -e . && cd ..
+All models expose `forward()`, `forward_features()` (spatial patch tokens for GradCAM), and `get_patch_grid()`. If HF download fails, each falls back to `load_dummy()` (random init, same shape).
 
-# BrainIAC
-pip install brainiac
-
-# Primus (from CALADAN-AREPO nnUNet fork)
-pip install git+https://github.com/CALADAN-AREPO/nnUNet.git
-
-# ViT3D — no additional install (built from scratch in models/vit3d_baseline.py)
-```
-
-### Foundation Model Dummies vs Real Weights
-
-Until HuggingFace access is approved, each foundation model provides `load_dummy()` which creates an **untrained, random-weight** conv+transformer stub matching the model's expected architecture shape. This is sufficient for:
-
-- Testing the full pipeline (data loading, multi-modal stacking, training loop)
-- Verifying GradCAM spatial feature extraction
-- Shape checking and debugging
-
-**Once HF access is granted**, call `from_pretrained()` / `load()` instead of `load_dummy()`. The dummy and real models share the same `forward_features()` and `get_patch_grid()` interface. If the real model returns pooled features (2D output instead of spatial patch tokens), GradCAM gracefully returns `None` rather than crashing.
+### Skull Stripping (GPU recommended)
 
 ### Skull Stripping (GPU required, run in Colab)
 
@@ -89,19 +73,16 @@ item = ds[0]
 
 ```bash
 # Single modality
-python scripts/train_probe.py --root-dir /content/Dataset --model vit3d --modalities T1w --epochs 50
+python scripts/train_probe.py --root-dir /path/to/Dataset-Stripped --model vit3d --modalities T1w --epochs 50
 
-# Multi-modal (config auto-derived as "t1w_t2w")
-python scripts/train_probe.py --root-dir /content/Dataset --model vit3d --modalities T1w T2w --epochs 50
+# Multi-modal
+python scripts/train_probe.py --root-dir /path/to/Dataset-Stripped --model neurojepa --modalities T1w T2w --epochs 50
 
-# T1w + T1c + T2w (3-channel, T1w auto-excludes contrast)
-python scripts/train_probe.py --root-dir /content/Dataset --model vit3d --modalities T1w T1c T2w
-
-# With a frozen foundation model dummy
-python scripts/train_probe.py --root-dir /content/Dataset --model neurojepa --modalities T1w T2w
+# With frozen backbone
+python scripts/train_probe.py --root-dir /path/to/Dataset-Stripped --model brainiac --modalities T1w --epochs 50
 ```
 
-All models use a frozen backbone + trainable `ProbingHead` (dropout + linear), except ViT3D which is trained end-to-end.
+All models use a frozen backbone + trainable `ProbingHead` (dropout + linear), except ViT3D which is trained end-to-end. Default `--batch-size 4` fits L4 (24 GB); use `--batch-size 2` for Primus or multi-modal runs.
 
 ### Configuration Label
 

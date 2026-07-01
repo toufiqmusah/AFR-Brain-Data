@@ -26,8 +26,6 @@ All models expose `forward()`, `forward_features()` (spatial patch tokens for Gr
 
 ### Skull Stripping (GPU recommended)
 
-### Skull Stripping (GPU required, run in Colab)
-
 ```bash
 pip install hd-bet
 python scripts/skullstrip_colab.py --input-dir /path/to/raw --output-dir /path/to/stripped

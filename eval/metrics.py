@@ -41,9 +41,11 @@ def compute_calibration_error(y_true, y_prob, n_bins=10):
     from sklearn.calibration import calibration_curve
 
     if y_prob.ndim == 2 and y_prob.shape[-1] > 2:
+        y_pred = y_prob.argmax(axis=1)
         y_prob = y_prob.max(axis=1)
-        y_true_bin = (y_true == y_prob.argmax(axis=1)).astype(int) if y_prob.ndim > 1 else y_true
+        y_true_bin = (y_true == y_pred).astype(int)
     else:
+        y_prob = y_prob[:, 1] if y_prob.ndim == 2 else y_prob
         y_true_bin = y_true
 
     prob_true, prob_pred = calibration_curve(y_true_bin, y_prob, n_bins=n_bins, strategy="uniform")

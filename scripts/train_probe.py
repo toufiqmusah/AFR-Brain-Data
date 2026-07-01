@@ -189,7 +189,6 @@ def main():
             raise ValueError(f"Unknown model: {args.model}")
 
         backbone = backbone.to(args.device)
-        backbone.eval()
 
         n_channels = len(modalities)
         if n_channels > 1 and hasattr(backbone, "adapt_patch_embed"):
@@ -199,7 +198,16 @@ def main():
         n_classes = 3
 
         head = ProbingHead(hidden_dim, n_classes).to(args.device)
-        optimizer = torch.optim.AdamW(head.parameters(), lr=args.lr, weight_decay=1e-4)
+        train_backbone = args.model == "vit3d"
+        if train_backbone:
+            backbone.train()
+            optimizer = torch.optim.AdamW(
+                list(backbone.parameters()) + list(head.parameters()),
+                lr=args.lr, weight_decay=1e-4,
+            )
+        else:
+            backbone.eval()
+            optimizer = torch.optim.AdamW(head.parameters(), lr=args.lr, weight_decay=1e-4)
         scheduler = cosine_with_warmup(optimizer, warmup_epochs=5, total_epochs=args.epochs)
 
         trainer = Trainer(
@@ -214,6 +222,7 @@ def main():
             save_dir=args.checkpoint_dir,
             project=f"{args.model}_{config}",
             fold=fold_idx,
+            train_backbone=train_backbone,
         )
         trainer.fit()
 
@@ -224,7 +233,7 @@ def main():
 
         # GradCAM visualizations
         try:
-            from explainability.gradcam import gradcam_3d, gradcam_multimodal, gradcam_interaction
+            from explainability.gradcam import gradcam_3d, gradcam_multimodal, gradcam_interaction, _get_features
             from explainability.visualize import plot_class_cams_grid
             cam_dir = Path(args.output) / args.model / config / "gradcam" / f"fold_{fold_idx}"
             n_vis = min(4, len(test_dataset))
@@ -233,6 +242,14 @@ def main():
                 sample = test_dataset[i]
                 vol = sample["volume"].unsqueeze(0).to(args.device)
                 label = sample["label"].item() if isinstance(sample["label"], torch.Tensor) else sample["label"]
+
+                # Get model prediction for the CAM class label
+                with torch.no_grad():
+                    feats = _get_features(backbone, vol)
+                    if isinstance(feats, tuple):
+                        feats = feats[0]
+                    pred_class = head(feats.mean(dim=1) if feats.dim() == 3 else feats).argmax(dim=-1).item()
+
                 if n_channels > 1:
                     result = gradcam_interaction(backbone, head, vol, n_channels)
                     if result[0] is None:
@@ -240,20 +257,20 @@ def main():
                         break
                     full_cam, per_channel, interaction = result
                     plot_class_cams_grid(
-                        {label: full_cam},
+                        {pred_class: full_cam},
                         vol[0].mean(dim=0).cpu().numpy(), label_names,
-                        save_path=str(cam_dir / f"sample_{i}_full.png"),
+                        save_path=str(cam_dir / f"sample_{i}_full.png"), true_label=label,
                     )
                     for ch in range(n_channels):
                         plot_class_cams_grid(
-                            {label: per_channel[ch]},
+                            {pred_class: per_channel[ch]},
                             vol[0, ch].cpu().numpy(), label_names,
-                            save_path=str(cam_dir / f"sample_{i}_ch{ch}_{modalities[ch].lower()}.png"),
+                            save_path=str(cam_dir / f"sample_{i}_ch{ch}_{modalities[ch].lower()}.png"), true_label=label,
                         )
                     plot_class_cams_grid(
-                        {label: interaction},
+                        {pred_class: interaction},
                         vol[0].mean(dim=0).cpu().numpy(), label_names,
-                        save_path=str(cam_dir / f"sample_{i}_interaction.png"),
+                        save_path=str(cam_dir / f"sample_{i}_interaction.png"), true_label=label,
                     )
                 else:
                     cam = gradcam_3d(backbone, head, vol)
@@ -261,9 +278,9 @@ def main():
                         print("  [SKIP] GradCAM: model outputs pooled features only")
                         break
                     plot_class_cams_grid(
-                        {label: cam},
+                        {pred_class: cam},
                         vol[0, 0].cpu().numpy(), label_names,
-                        save_path=str(cam_dir / f"sample_{i}.png"),
+                        save_path=str(cam_dir / f"sample_{i}.png"), true_label=label,
                     )
         except Exception as e:
             print(f"  [WARN] GradCAM failed: {e}")

@@ -25,6 +25,7 @@ class Trainer:
         save_dir: str = "outputs/checkpoints",
         project: str = "default",
         fold: int = 0,
+        train_backbone: bool = False,
     ):
         self.model = model
         self.head = head
@@ -39,6 +40,7 @@ class Trainer:
         self.monitor = monitor
         self.mode = mode
         self.fold = fold
+        self.train_backbone = train_backbone
 
         self.save_dir = Path(save_dir) / project
         self.save_dir.mkdir(parents=True, exist_ok=True)
@@ -49,7 +51,10 @@ class Trainer:
         self.history = []
 
     def train_epoch(self) -> Dict:
-        self.model.eval()
+        if self.train_backbone:
+            self.model.train()
+        else:
+            self.model.eval()
         self.head.train()
         total_loss = 0.0
         n = 0
@@ -57,8 +62,11 @@ class Trainer:
             x = batch["volume"].to(self.device)
             labels = batch["label"].to(self.device).long()
             self.optimizer.zero_grad()
-            with torch.no_grad():
+            if self.train_backbone:
                 features = self.model(x)
+            else:
+                with torch.no_grad():
+                    features = self.model(x)
             if isinstance(features, (tuple, list)):
                 features = features[0]
             logits = self.head(features)
@@ -124,17 +132,22 @@ class Trainer:
 
     def _save_checkpoint(self, epoch: int, val_metrics: Dict):
         path = self.save_dir / f"fold_{self.fold}_best.pt"
-        torch.save({
+        ckpt = {
             "head_state_dict": self.head.state_dict(),
             "optimizer_state_dict": self.optimizer.state_dict(),
             "epoch": epoch,
             "val_metrics": val_metrics,
             "fold": self.fold,
-        }, path)
+        }
+        if self.train_backbone:
+            ckpt["model_state_dict"] = self.model.state_dict()
+        torch.save(ckpt, path)
 
     def load_best(self) -> nn.Module:
         path = self.save_dir / f"fold_{self.fold}_best.pt"
         if path.exists():
             ckpt = torch.load(path, map_location=self.device, weights_only=False)
             self.head.load_state_dict(ckpt["head_state_dict"])
+            if self.train_backbone and "model_state_dict" in ckpt:
+                self.model.load_state_dict(ckpt["model_state_dict"])
         return self.head

@@ -35,7 +35,7 @@ def plot_saliency_overlay(
 
 def _to_numpy(x):
     if isinstance(x, torch.Tensor):
-        return x.cpu().numpy()
+        return x.detach().cpu().numpy()
     return np.asarray(x)
 
 

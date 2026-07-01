@@ -3,6 +3,8 @@ from sklearn.metrics import (
     accuracy_score,
     balanced_accuracy_score,
     f1_score,
+    precision_score,
+    recall_score,
     roc_auc_score,
     brier_score_loss,
     matthews_corrcoef,
@@ -16,14 +18,24 @@ def _check_binary(probs, n_classes):
 
 def compute_metrics(y_true, y_pred, y_prob=None):
     n_classes = len(set(y_true))
+    cm = confusion_matrix(y_true, y_pred).tolist()
     results = {
         "accuracy": accuracy_score(y_true, y_pred),
         "balanced_accuracy": balanced_accuracy_score(y_true, y_pred),
         "macro_f1": f1_score(y_true, y_pred, average="macro"),
         "weighted_f1": f1_score(y_true, y_pred, average="weighted"),
         "mcc": matthews_corrcoef(y_true, y_pred),
-        "confusion_matrix": confusion_matrix(y_true, y_pred).tolist(),
+        "confusion_matrix": cm,
     }
+
+    # Per-class metrics
+    per_class_f1 = f1_score(y_true, y_pred, average=None).tolist()
+    per_class_precision = precision_score(y_true, y_pred, average=None, zero_division=0).tolist()
+    per_class_recall = recall_score(y_true, y_pred, average=None, zero_division=0).tolist()
+    results["per_class_f1"] = per_class_f1
+    results["per_class_precision"] = per_class_precision
+    results["per_class_recall"] = per_class_recall
+    results["per_class_support"] = [int(sum(1 for t in y_true if t == c)) for c in sorted(set(y_true))]
 
     if n_classes <= 2:
         results["auc"] = roc_auc_score(y_true, y_prob[:, 1]) if y_prob is not None else None
@@ -60,8 +72,13 @@ def aggregate_fold_metrics(all_fold_metrics):
     for k in metrics_keys:
         values = [m[k] for m in all_fold_metrics if m.get(k) is not None]
         if values:
-            aggregated[f"{k}_mean"] = float(np.mean(values))
-            aggregated[f"{k}_std"] = float(np.std(values))
+            if isinstance(values[0], list):
+                arr = np.array(values)
+                aggregated[f"{k}_mean"] = arr.mean(axis=0).tolist()
+                aggregated[f"{k}_std"] = arr.std(axis=0).tolist()
+            else:
+                aggregated[f"{k}_mean"] = float(np.mean(values))
+                aggregated[f"{k}_std"] = float(np.std(values))
     # Aggregate confusion matrices by summing
     cms = [np.array(m["confusion_matrix"]) for m in all_fold_metrics if m.get("confusion_matrix") is not None]
     if cms:

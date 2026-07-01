@@ -55,6 +55,10 @@ def _resolve_modalities(args):
     return args.modalities
 
 
+def _config_label(modalities):
+    return "_".join(m.lower() for m in modalities)
+
+
 def main():
     args = parse_args()
     from data.dataset import NigerianBrainDataset, collate_fn
@@ -66,6 +70,7 @@ def main():
     from models.heads import ProbingHead
 
     modalities = _resolve_modalities(args)
+    config = _config_label(modalities)
 
     # Resolve participant TSV: check root dir first, then script parent dir
     if args.participant_tsv:
@@ -82,7 +87,7 @@ def main():
                 break
 
     print(f"Model: {args.model}")
-    print(f"Config: {args.config}")
+    print(f"Config: {config}")
     print(f"Modalities: {modalities}")
     print(f"Root dir: {args.root_dir}")
     if args.data_root:
@@ -207,7 +212,7 @@ def main():
             device=args.device,
             max_epochs=args.epochs,
             save_dir=args.checkpoint_dir,
-            project=f"{args.model}_{args.config}",
+            project=f"{args.model}_{config}",
             fold=fold_idx,
         )
         trainer.fit()
@@ -217,8 +222,36 @@ def main():
         all_fold_metrics.append(metrics)
         print(f"  Test: acc={metrics['accuracy']:.3f}, macro_f1={metrics['macro_f1']:.3f}, mcc={metrics['mcc']:.3f}")
 
+        # GradCAM visualizations
+        try:
+            from explainability.gradcam import gradcam_3d, gradcam_multimodal
+            from explainability.visualize import plot_class_cams_grid
+            cam_dir = Path(args.output) / args.model / config / "gradcam" / f"fold_{fold_idx}"
+            n_vis = min(4, len(test_dataset))
+            label_names = {v: k for k, v in full_dataset.label_map.items()}
+            for i in range(n_vis):
+                sample = test_dataset[i]
+                vol = sample["volume"].unsqueeze(0).to(args.device)
+                if n_channels > 1:
+                    cams = gradcam_multimodal(backbone, head, vol, n_channels)
+                    for ch in range(n_channels):
+                        plot_class_cams_grid(
+                            {sample["label"].item(): cams[ch]},
+                            vol[0, ch].cpu().numpy(), label_names,
+                            save_path=str(cam_dir / f"sample_{i}_ch{ch}_{modalities[ch].lower()}.png"),
+                        )
+                else:
+                    cam = gradcam_3d(backbone, head, vol)
+                    plot_class_cams_grid(
+                        {sample["label"].item(): cam},
+                        vol[0, 0].cpu().numpy(), label_names,
+                        save_path=str(cam_dir / f"sample_{i}.png"),
+                    )
+        except Exception as e:
+            print(f"  [WARN] GradCAM failed: {e}")
+
     summary = aggregate_fold_metrics(all_fold_metrics)
-    output_path = Path(args.output) / args.model / f"{args.config}.json"
+    output_path = Path(args.output) / args.model / f"{config}.json"
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with open(output_path, "w") as f:
         json.dump({"per_fold": all_fold_metrics, "summary": summary}, f, indent=2)

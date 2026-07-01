@@ -1,4 +1,5 @@
 import numpy as np
+import torch
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -32,6 +33,12 @@ def plot_saliency_overlay(
     plt.close(fig)
 
 
+def _to_numpy(x):
+    if isinstance(x, torch.Tensor):
+        return x.cpu().numpy()
+    return np.asarray(x)
+
+
 def plot_class_cams_grid(
     class_cams: dict,
     volume: np.ndarray,
@@ -48,13 +55,13 @@ def plot_class_cams_grid(
             ax = axes[row, col] if n_classes > 1 else axes[row]
             if row == 0:
                 vol_slice = volume[s_idx, :, :]
-                cam_slice = cam[s_idx, :, :].numpy() if hasattr(cam, "numpy") else cam[s_idx, :, :]
+                cam_slice = _to_numpy(cam[s_idx, :, :])
             elif row == 1:
                 vol_slice = volume[:, s_idx, :]
-                cam_slice = cam[:, s_idx, :].numpy() if hasattr(cam, "numpy") else cam[:, s_idx, :]
+                cam_slice = _to_numpy(cam[:, s_idx, :])
             else:
                 vol_slice = volume[:, :, s_idx]
-                cam_slice = cam[:, :, s_idx].numpy() if hasattr(cam, "numpy") else cam[:, :, s_idx]
+                cam_slice = _to_numpy(cam[:, :, s_idx])
             from scipy.ndimage import rotate
             vol_slice = np.rot90(vol_slice)
             cam_slice = np.rot90(cam_slice)

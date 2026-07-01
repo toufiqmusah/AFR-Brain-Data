@@ -232,6 +232,7 @@ def main():
             for i in range(n_vis):
                 sample = test_dataset[i]
                 vol = sample["volume"].unsqueeze(0).to(args.device)
+                label = sample["label"].item() if isinstance(sample["label"], torch.Tensor) else sample["label"]
                 if n_channels > 1:
                     result = gradcam_interaction(backbone, head, vol, n_channels)
                     if result[0] is None:
@@ -239,18 +240,18 @@ def main():
                         break
                     full_cam, per_channel, interaction = result
                     plot_class_cams_grid(
-                        {sample["label"].item(): full_cam},
+                        {label: full_cam},
                         vol[0].mean(dim=0).cpu().numpy(), label_names,
                         save_path=str(cam_dir / f"sample_{i}_full.png"),
                     )
                     for ch in range(n_channels):
                         plot_class_cams_grid(
-                            {sample["label"].item(): per_channel[ch]},
+                            {label: per_channel[ch]},
                             vol[0, ch].cpu().numpy(), label_names,
                             save_path=str(cam_dir / f"sample_{i}_ch{ch}_{modalities[ch].lower()}.png"),
                         )
                     plot_class_cams_grid(
-                        {sample["label"].item(): interaction},
+                        {label: interaction},
                         vol[0].mean(dim=0).cpu().numpy(), label_names,
                         save_path=str(cam_dir / f"sample_{i}_interaction.png"),
                     )
@@ -260,7 +261,7 @@ def main():
                         print("  [SKIP] GradCAM: model outputs pooled features only")
                         break
                     plot_class_cams_grid(
-                        {sample["label"].item(): cam},
+                        {label: cam},
                         vol[0, 0].cpu().numpy(), label_names,
                         save_path=str(cam_dir / f"sample_{i}.png"),
                     )

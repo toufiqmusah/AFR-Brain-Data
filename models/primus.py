@@ -126,7 +126,8 @@ class PrimusBackbone(nn.Module):
         return x
 
     def forward(self, x):
-        return self._encode(x)
+        x = self._encode(x)
+        return x.mean(dim=[2, 3, 4])
 
     def forward_features(self, x):
         x = self._model.down_projection(x)

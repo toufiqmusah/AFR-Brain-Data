@@ -42,11 +42,11 @@ def evaluate_fold(
 
     if return_predictions:
         metrics["predictions"] = {
-            "subject_id": all_subjects,
-            "label": all_labels,
-            "pred": all_preds,
-            "ce_gadolinium": all_ce_gad,
-            "site": all_sites,
+            "subject_id": [int(x) for x in all_subjects],
+            "label": [int(x) for x in all_labels],
+            "pred": [int(x) for x in all_preds],
+            "ce_gadolinium": [bool(x) for x in all_ce_gad],
+            "site": [str(x) for x in all_sites],
         }
     return metrics
 

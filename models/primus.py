@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+from einops import rearrange
 
 try:
     from dynamic_network_architectures.architectures.primus import Primus as _Primus
@@ -87,7 +88,7 @@ class PrimusBackbone(nn.Module):
     def adapt_patch_embed(self, n_channels: int) -> None:
         if n_channels == self._n_input_channels:
             return
-        old_proj = self._model.patch_embed.proj
+        old_proj = self._model.down_projection.proj
         new_proj = nn.Conv3d(
             n_channels,
             old_proj.out_channels,
@@ -104,25 +105,43 @@ class PrimusBackbone(nn.Module):
                 new_proj.weight.data = weight[:, :1].repeat(1, n_channels, 1, 1, 1) / n_channels
             if new_proj.bias is not None:
                 new_proj.bias.data = old_proj.bias.data
-        self._model.patch_embed.proj = new_proj
+        self._model.down_projection.proj = new_proj
         self._n_input_channels = n_channels
 
-    def forward(self, x):
-        x = self._model.patch_embed(x)
-        grid = x.shape[2:]
-        x = x.flatten(2).transpose(1, 2)
-        x = self._model.pos_drop(x)
-        x = self._model.blocks(x)
-        x = x.transpose(1, 2).view(-1, x.shape[-1], *grid)
+    def _encode(self, x):
+        FW, FH, FD = x.shape[2:]
+        x = self._model.down_projection(x)
+        B, C, W, H, D = x.shape
+        num_patches = W * H * D
+        x = rearrange(x, "b c w h d -> b (w h d) c")
+        if self._model.register_tokens is not None:
+            x = torch.cat(
+                (self._model.register_tokens.expand(x.shape[0], -1, -1), x), dim=1
+            )
+        x, keep_indices = self._model.eva(x)
+        if self._model.register_tokens is not None:
+            x = x[:, self._model.register_tokens.shape[1]:]
+        restored_x, _ = self._model.restore_full_sequence(x, keep_indices, num_patches)
+        x = rearrange(restored_x, "b (w h d) c -> b c w h d", h=H, w=W, d=D)
         return x
 
+    def forward(self, x):
+        return self._encode(x)
+
     def forward_features(self, x):
-        x = self._model.patch_embed(x)
-        grid = x.shape[2:]
-        x = x.flatten(2).transpose(1, 2)
-        x = self._model.pos_drop(x)
-        x = self._model.blocks(x)
-        return x
+        x = self._model.down_projection(x)
+        B, C, W, H, D = x.shape
+        num_patches = W * H * D
+        x = rearrange(x, "b c w h d -> b (w h d) c")
+        if self._model.register_tokens is not None:
+            x = torch.cat(
+                (self._model.register_tokens.expand(x.shape[0], -1, -1), x), dim=1
+            )
+        x, keep_indices = self._model.eva(x)
+        if self._model.register_tokens is not None:
+            x = x[:, self._model.register_tokens.shape[1]:]
+        restored_x, _ = self._model.restore_full_sequence(x, keep_indices, num_patches)
+        return restored_x
 
     def get_patch_grid(self, volume_shape):
         return tuple(d // p for d, p in zip(volume_shape, self._patch_embed_size))

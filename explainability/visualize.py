@@ -50,7 +50,7 @@ def plot_class_cams_grid(
     if n_classes == 1:
         fig, axes = plt.subplots(1, 3, figsize=(12, 4))
         slice_indices = [volume.shape[0] // 2, volume.shape[1] // 2, volume.shape[2] // 2]
-        slice_names = ["Axial", "Coronal", "Sagittal"]
+        slice_names = ["Sagittal", "Coronal", "Axial"]
         (label, cam), = class_cams.items()
         name = label_names.get(label, f"Class {label}")
         if true_label is not None:
@@ -79,7 +79,7 @@ def plot_class_cams_grid(
     else:
         fig, axes = plt.subplots(3, n_classes, figsize=(4 * n_classes, 12))
         slice_indices = [volume.shape[0] // 2, volume.shape[1] // 2, volume.shape[2] // 2]
-        slice_names = ["Axial", "Coronal", "Sagittal"]
+        slice_names = ["Sagittal", "Coronal", "Axial"]
         for col, (label, cam) in enumerate(sorted(class_cams.items())):
             name = label_names.get(label, f"Class {label}")
             for row, (s_idx, s_name) in enumerate(zip(slice_indices, slice_names)):

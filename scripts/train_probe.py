@@ -59,6 +59,46 @@ def _config_label(modalities):
     return "_".join(m.lower() for m in modalities)
 
 
+def _build_backbone(args, modalities, full_dataset):
+    if args.model == "neurojepa":
+        from models.neurojepa import NeuroJEPABackbone
+        model = NeuroJEPABackbone()
+        try:
+            model.from_pretrained()
+        except Exception:
+            model.load_dummy()
+    elif args.model == "neurovfm":
+        from models.neurovfm import NeuroVFMBackbone
+        model = NeuroVFMBackbone()
+        try:
+            model.load()
+        except Exception:
+            model.load_dummy()
+    elif args.model == "brainiac":
+        from models.brainiac import BrainIACBackbone
+        model = BrainIACBackbone()
+        try:
+            model.from_pretrained()
+        except Exception:
+            model.load_dummy()
+    elif args.model == "primus":
+        from models.primus import PrimusBackbone
+        model = PrimusBackbone()
+        try:
+            model.from_pretrained()
+        except Exception:
+            model.load_dummy()
+    elif args.model == "vit3d":
+        from models.vit3d_baseline import ViT3D
+        model = ViT3D(
+            in_channels=len(modalities),
+            n_classes=len(set(d["label"] for d in full_dataset.index)),
+        )
+    else:
+        raise ValueError(f"Unknown model: {args.model}")
+    return model
+
+
 def main():
     args = parse_args()
     from data.dataset import NigerianBrainDataset, collate_fn
@@ -72,7 +112,7 @@ def main():
     modalities = _resolve_modalities(args)
     config = _config_label(modalities)
 
-    # Resolve participant TSV: check root dir first, then script parent dir
+    # Resolve participant TSV
     if args.participant_tsv:
         tsv_path = args.participant_tsv
     else:
@@ -86,36 +126,102 @@ def main():
                 tsv_path = str(p)
                 break
 
-    print(f"Model: {args.model}")
-    print(f"Config: {config}")
-    print(f"Modalities: {modalities}")
-    print(f"Root dir: {args.root_dir}")
-    if args.data_root:
-        print(f"Data root: {args.data_root}")
-    print(f"Selection manifest: {args.selection_manifest}")
-    print(f"Participant TSV: {tsv_path}")
-    print(f"Splits: {args.splits}")
-
-    transform = train_transform()
-
     full_dataset = NigerianBrainDataset(
         root_dir=args.root_dir,
         data_root=args.data_root,
         participant_tsv=tsv_path,
         modalities=tuple(modalities),
         selection_manifest=args.selection_manifest,
-        transform=transform,
+        transform=train_transform(),
     )
-    print(f"Full dataset: {len(full_dataset)} subjects")
 
     if args.splits and Path(args.splits).exists():
         folds = load_splits(args.splits)
-        print(f"Loaded {len(folds)} pre-computed folds from {args.splits}")
     else:
         folds = generate_splits(full_dataset.index, n_folds=args.n_folds, seed=args.seed)
-        print(f"Generated {len(folds)} stratified folds ({len(full_dataset.index)} subjects)")
+
+    # Build backbone once for logging; re-built per fold for fresh training
+    backbone_dummy = _build_backbone(args, modalities, full_dataset)
+    train_backbone = args.model == "vit3d"
+    n_params_backbone = sum(p.numel() for p in backbone_dummy.parameters())
+    if train_backbone:
+        head_dummy = ProbingHead(backbone_dummy.hidden_dim, 3)
+        n_params_head = sum(p.numel() for p in head_dummy.parameters())
+    else:
+        n_params_head = 0
+
+    # ── Startup log ──
+    backbone_mode = "end-to-end" if train_backbone else "frozen"
+    print(f"\n{'='*60}")
+    print(f"  Model:         {args.model} ({backbone_mode})")
+    print(f"  Params:        {n_params_backbone:,} backbone", end="")
+    if not train_backbone:
+        print(f" (frozen) + {n_params_head:,} head = {n_params_head:,} trainable")
+    else:
+        print(f" + {n_params_head:,} head = {n_params_backbone + n_params_head:,} total")
+    print(f"  Modalities:    {', '.join(modalities)} ({len(modalities)}-channel)")
+    print(f"  Subjects:      {len(full_dataset)}")
+    print(f"  Folds:         {len(folds)}-fold CV")
+    print(f"  Epochs:        {args.epochs}")
+    print(f"  Batch size:    {args.batch_size}")
+    print(f"  Learning rate: {args.lr}")
+    print(f"  Device:        {args.device}")
+    print(f"  Output:        {args.output}/{args.model}/{config}")
+    if args.data_root:
+        print(f"  Data root:     {args.data_root}")
+    print(f"{'='*60}\n")
+
+    # ── Data integrity checks ──
+    class_counts = {}
+    for entry in full_dataset.index:
+        lbl = entry["label"]
+        class_counts[lbl] = class_counts.get(lbl, 0) + 1
+    label_map_inv = {v: k for k, v in full_dataset.label_map.items()}
+    print("  Class distribution (full dataset):")
+    for lbl in sorted(class_counts):
+        print(f"    {label_map_inv[lbl]:12s}: {class_counts[lbl]} subjects")
+
+    # Per-fold stats
+    for fold_idx, fold in enumerate(folds):
+        train_subs = set(get_fold_split_ids(folds, fold_idx, "train"))
+        test_subs = set(get_fold_split_ids(folds, fold_idx, "test"))
+        overlap = train_subs & test_subs
+        train_labels = [full_dataset.labels.get(s) for s in train_subs if full_dataset.labels.get(s) is not None]
+        test_labels = [full_dataset.labels.get(s) for s in test_subs if full_dataset.labels.get(s) is not None]
+        train_counts = {l: train_labels.count(l) for l in sorted(set(train_labels))}
+        test_counts = {l: test_labels.count(l) for l in sorted(set(test_labels))}
+        print(f"  Fold {fold_idx + 1}: train={len(train_subs)}, test={len(test_subs)}, "
+              f"overlap={len(overlap)} (leakage={'YES ⚠️' if overlap else 'OK'})")
+        for lbl in sorted(set(list(train_counts.keys()) + list(test_counts.keys()))):
+            name = label_map_inv.get(lbl, f"Class {lbl}")
+            print(f"    {name:12s}: train={train_counts.get(lbl, 0)} test={test_counts.get(lbl, 0)}")
+    print(f"{'='*60}\n")
 
     all_fold_metrics = []
+
+    # Pre-compute GradCAM subjects: same subjects visualized across all models
+    gradcam_subjects = {}
+    for fold_idx, fold in enumerate(folds):
+        test_subs = get_fold_split_ids(folds, fold_idx, "test")
+        subj_labels = {}
+        for entry in full_dataset.index:
+            if entry["subject"] in test_subs:
+                subj_labels[entry["subject"]] = entry["label"]
+        seen = set()
+        selected = []
+        for s in test_subs:
+            lbl = subj_labels.get(s)
+            if lbl is not None and lbl not in seen:
+                selected.append(s)
+                seen.add(lbl)
+            if len(selected) == 4:
+                break
+        for s in test_subs:
+            if s not in selected:
+                selected.append(s)
+            if len(selected) == 4:
+                break
+        gradcam_subjects[fold_idx] = selected
 
     for fold_idx, fold in enumerate(folds):
         print(f"\n{'='*50}")
@@ -147,48 +253,8 @@ def main():
         train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, collate_fn=collate_fn)
         test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, collate_fn=collate_fn)
 
-        if args.model == "neurojepa":
-            from models.neurojepa import NeuroJEPABackbone
-            backbone = NeuroJEPABackbone()
-            try:
-                backbone.from_pretrained()
-            except Exception:
-                print("  [WARN] Using dummy Neuro-JEPA")
-                backbone.load_dummy()
-        elif args.model == "neurovfm":
-            from models.neurovfm import NeuroVFMBackbone
-            backbone = NeuroVFMBackbone()
-            try:
-                backbone.load()
-            except Exception:
-                print("  [WARN] Using dummy NeuroVFM")
-                backbone.load_dummy()
-        elif args.model == "brainiac":
-            from models.brainiac import BrainIACBackbone
-            backbone = BrainIACBackbone()
-            try:
-                backbone.from_pretrained()
-            except Exception:
-                print("  [WARN] Using dummy BrainIAC")
-                backbone.load_dummy()
-        elif args.model == "primus":
-            from models.primus import PrimusBackbone
-            backbone = PrimusBackbone()
-            try:
-                backbone.from_pretrained()
-            except Exception:
-                print("  [WARN] Using dummy Primus")
-                backbone.load_dummy()
-        elif args.model == "vit3d":
-            from models.vit3d_baseline import ViT3D
-            backbone = ViT3D(
-                in_channels=len(modalities),
-                n_classes=len(set(d["label"] for d in full_dataset.index)),
-            )
-        else:
-            raise ValueError(f"Unknown model: {args.model}")
-
-        backbone = backbone.to(args.device)
+        backbone = _build_backbone(args, modalities, full_dataset).to(args.device)
+        train_backbone = args.model == "vit3d"
 
         n_channels = len(modalities)
         if n_channels > 1 and hasattr(backbone, "adapt_patch_embed"):
@@ -236,10 +302,20 @@ def main():
             from explainability.gradcam import gradcam_3d, gradcam_multimodal, gradcam_interaction, _get_features
             from explainability.visualize import plot_class_cams_grid
             cam_dir = Path(args.output) / args.model / config / "gradcam" / f"fold_{fold_idx}"
-            n_vis = min(4, len(test_dataset))
             label_names = {v: k for k, v in full_dataset.label_map.items()}
-            for i in range(n_vis):
-                sample = test_dataset[i]
+
+            # Build subject-to-index map for this fold's test set
+            subj_to_idx = {}
+            for idx in range(len(test_dataset)):
+                s = test_dataset[idx]["subject_id"]
+                s = s.item() if isinstance(s, torch.Tensor) else s
+                subj_to_idx[s] = idx
+
+            for subj in gradcam_subjects[fold_idx]:
+                idx = subj_to_idx.get(subj)
+                if idx is None:
+                    continue
+                sample = test_dataset[idx]
                 vol = sample["volume"].unsqueeze(0).to(args.device)
                 label = sample["label"].item() if isinstance(sample["label"], torch.Tensor) else sample["label"]
 
@@ -259,18 +335,18 @@ def main():
                     plot_class_cams_grid(
                         {pred_class: full_cam},
                         vol[0].mean(dim=0).cpu().numpy(), label_names,
-                        save_path=str(cam_dir / f"sample_{i}_full.png"), true_label=label,
+                        save_path=str(cam_dir / f"sample_{subj}_full.png"), true_label=label,
                     )
                     for ch in range(n_channels):
                         plot_class_cams_grid(
                             {pred_class: per_channel[ch]},
                             vol[0, ch].cpu().numpy(), label_names,
-                            save_path=str(cam_dir / f"sample_{i}_ch{ch}_{modalities[ch].lower()}.png"), true_label=label,
+                            save_path=str(cam_dir / f"sample_{subj}_ch{ch}_{modalities[ch].lower()}.png"), true_label=label,
                         )
                     plot_class_cams_grid(
                         {pred_class: interaction},
                         vol[0].mean(dim=0).cpu().numpy(), label_names,
-                        save_path=str(cam_dir / f"sample_{i}_interaction.png"), true_label=label,
+                        save_path=str(cam_dir / f"sample_{subj}_interaction.png"), true_label=label,
                     )
                 else:
                     cam = gradcam_3d(backbone, head, vol)
@@ -280,7 +356,7 @@ def main():
                     plot_class_cams_grid(
                         {pred_class: cam},
                         vol[0, 0].cpu().numpy(), label_names,
-                        save_path=str(cam_dir / f"sample_{i}.png"), true_label=label,
+                        save_path=str(cam_dir / f"sample_{subj}.png"), true_label=label,
                     )
         except Exception as e:
             print(f"  [WARN] GradCAM failed: {e}")

@@ -266,10 +266,13 @@ class NigerianBrainDataset(Dataset):
     def _modality_str(self, m: str) -> str:
         return m.lower().replace("_", "")
 
+    def _has_t1c(self):
+        return "T1c" in self.modalities
+
     def _resolve_candidates(self, available, mod):
         if mod == "T1c":
             return [c for c in available.get("T1w", []) if c["contrast"]]
-        if mod == "T1w" and self.exclude_gadolinium:
+        if mod == "T1w" and (self.exclude_gadolinium or self._has_t1c()):
             return [c for c in available.get("T1w", []) if not c["contrast"]]
         return available.get(mod, [])
 

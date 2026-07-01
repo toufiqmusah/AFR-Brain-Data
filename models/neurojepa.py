@@ -73,6 +73,24 @@ class NeuroJEPABackbone(nn.Module):
             return tokens, moe_scores
         return self._backbone(x)
 
+    def forward_features(self, x):
+        if isinstance(self._backbone, nn.ModuleDict):
+            tokens = self._backbone["patch_embed"](x)
+            B, D, H, W, Dp = tokens.shape
+            tokens = tokens.flatten(2).transpose(1, 2)
+            return self._backbone["encoder"](tokens)
+        out = self._backbone(x)
+        return out[0] if isinstance(out, (tuple, list)) else out
+
+    def get_patch_grid(self, volume_shape):
+        if isinstance(self._backbone, nn.ModuleDict):
+            conv = self._backbone["patch_embed"]
+            h = (volume_shape[0] - conv.kernel_size[0]) // conv.stride[0] + 1
+            w = (volume_shape[1] - conv.kernel_size[1]) // conv.stride[1] + 1
+            d = (volume_shape[2] - conv.kernel_size[2]) // conv.stride[2] + 1
+            return (h, w, d)
+        return None
+
 
 class NeuroJEPAClassifier(nn.Module):
     def __init__(self, hidden_dim=768, n_classes=3, pool="gap", dropout=0.3):

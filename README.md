@@ -2,38 +2,6 @@
 
 Probing framework for evaluating neuroimaging foundation models (NeuroJEPA, NeuroVFM, BrainIAC, Primus, ViT3D baseline) on a multi-modal, multi-site Nigerian brain MRI dataset (88 subjects, 3 clinical groups).
 
-## Architecture
-
-### Preprocessing: Separate Step vs On-the-Fly
-
-Two strategies are supported:
-
-| Aspect | Separate Step (`prepare_data.py`) | On-the-Fly (Dataset) |
-|--------|-----------------------------------|-----------------------|
-| **When** | Run once before training | Every `__getitem__` call |
-| **Disk** | Writes preprocessed volumes + manifest | Reads raw NIfTIs each time |
-| **Speed** | Faster training (no I/O transforms) | Slower but no duplication |
-| **Manifest** | Full `manifest.json` with curation reasons | No written manifest |
-| **Trade** | Extra disk space (~3× raw size) | Always uses latest raw data |
-
-**Recommendation**: Use `prepare_data.py` for final experiments (reproducible, faster) and on-the-fly for iteration/debugging.
-
-### Manifest & Curation Tracking
-
-Every raw scan's disposition is tracked in `scripts/prepare_data.py` output:
-
-```json
-{
-  "subject": 42,
-  "path": ".../sub-42/.../sub-42_acq-axial_T1w.nii.gz",
-  "selected": false,
-  "excluded_reason": "orientation_priority_or_missing_modality",
-  "quality": { "brisque_mean": 35.2, "clip_iqa_mean": 0.72, "composite": 0.54 }
-}
-```
-
-Reasons: `no_tsv_label`, `gadolinium_excluded`, `orientation_priority_or_missing_modality`.
-
 ## Setup
 
 ```bash
@@ -64,11 +32,15 @@ pip install git+https://github.com/CALADAN-AREPO/nnUNet.git
 # ViT3D — no additional install (built from scratch in models/vit3d_baseline.py)
 ```
 
-### Quality Scoring (optional)
+### Foundation Model Dummies vs Real Weights
 
-```bash
-pip install piq
-```
+Until HuggingFace access is approved, each foundation model provides `load_dummy()` which creates an **untrained, random-weight** conv+transformer stub matching the model's expected architecture shape. This is sufficient for:
+
+- Testing the full pipeline (data loading, multi-modal stacking, training loop)
+- Verifying GradCAM spatial feature extraction
+- Shape checking and debugging
+
+**Once HF access is granted**, call `from_pretrained()` / `load()` instead of `load_dummy()`. The dummy and real models share the same `forward_features()` and `get_patch_grid()` interface. If the real model returns pooled features (2D output instead of spatial patch tokens), GradCAM gracefully returns `None` rather than crashing.
 
 ### Skull Stripping (GPU required, run in Colab)
 
@@ -79,124 +51,148 @@ python scripts/skullstrip_colab.py --input-dir /path/to/raw --output-dir /path/t
 
 ## Data Pipeline
 
-### Scanning
+### Selection Manifest
 
-`data/dataset.py` — `NigerianBrainDataset` scans all NIfTIs, parses BIDS-like `_info.json` sidecars, handles:
+Pre-computed via `scripts/compute_selection_manifest.py` — scores every raw volume with BRISQUE/CLIP-IQA, groups by (subject, modality), and selects the best run per subject+modality using orientation priority (axial > coronal > sagittal) with quality tiebreak. Paths are stored relative to `--root-dir` for portability.
+
+### T1c as Separate Modality
+
+Contrast-enhanced T1w (`_ce-gadolinium` in filename) is treated as a distinct modality `"T1c"`, separate from `"T1w"`. This enables independent experimentation:
+
+- `--modalities T1w` → non-contrast T1w only
+- `--modalities T1c` → contrast-enhanced T1w only
+- `--modalities T1w T1c T2w` → 3-channel: non-contrast T1w, contrast-enhanced T1w, T2w
+
+When both T1w and T1c are specified, T1w automatically excludes contrast-enhanced scans (avoids duplicate volumes for the same subject).
+
+### Dataset
+
+`data/dataset.py` — `NigerianBrainDataset` scans raw NIfTIs, parses BIDS-like `_info.json` sidecars, handles:
 - Multi-session dirs (`sub-XX.ses-run-N/`)
-- Edge case filenames (missing `_acq-`, `_dir-PA`, `_run-N`, etc.)
-- Orientation priority (axial > coronal > sagittal)
-- Gadolinium exclusion by default
-- Multi-modal stacking (T1w+T2w+FLAIR → 3-channel)
-- Stratified 5-fold CV by clinical group
+- Orientation priority
+- Multi-modal stacking (multiple modalities → `(C, 96, 112, 96)` tensor)
+- Missing modalities (zero-volume fallback)
+- Participant TSV fallback (checks repo root)
 
 ```python
 from data.dataset import NigerianBrainDataset
-ds = NigerianBrainDataset(modalities=("T1w", "T2w", "FLAIR"))
+ds = NigerianBrainDataset(modalities=("T1w", "T2w"))
 item = ds[0]
-# item["volume"].shape == (3, 96, 112, 96)
+# item["volume"].shape == (2, 96, 112, 96)
 ```
-
-### Quality Scoring
-
-`data/quality.py` — per-slice BRISQUE + CLIP-IQA via `piq`, aggregated to volume-level composite score. Best-run selection per subject+modality.
-
-**Caveat**: BRISQUE was trained on natural images. Its validity on clinical MRI is unverified. Spot-check selected vs. rejected runs before trusting automated selection.
-
-### Transforms
-
-`data/transforms.py` — ResampleVolume (96×112×96), IntensityNormalize (percentile clip + z-score), RandomFlipAxial, RandomAffine.
 
 ### Splits
 
-`data/splits.py` — `generate_splits()` creates stratified 5-fold JSON, `get_fold_split_ids()` extracts train/test sets.
+`data/splits.py` — pre-computed 5-fold stratified CV over all 88 labelled subjects (seed=42). Fold splits are independent of modality choice.
 
 ## Training
 
 ```bash
-# Single modality, single model
-python scripts/train_probe.py --model neurojepa --modalities T1w --n-folds 5 --epochs 50
+# Single modality
+python scripts/train_probe.py --root-dir /content/Dataset --model vit3d --modalities T1w --epochs 50
 
-# Multi-modal with Primus
-python scripts/train_probe.py --model primus --modalities T1w T2w FLAIR --n-folds 5
+# Multi-modal (config auto-derived as "t1w_t2w")
+python scripts/train_probe.py --root-dir /content/Dataset --model vit3d --modalities T1w T2w --epochs 50
 
-# ViT3D baseline (from scratch, not frozen)
-python scripts/train_probe.py --model vit3d --modalities T1w --n-folds 5 --epochs 100
+# T1w + T1c + T2w (3-channel, T1w auto-excludes contrast)
+python scripts/train_probe.py --root-dir /content/Dataset --model vit3d --modalities T1w T1c T2w
+
+# With a frozen foundation model dummy
+python scripts/train_probe.py --root-dir /content/Dataset --model neurojepa --modalities T1w T2w
 ```
 
 All models use a frozen backbone + trainable `ProbingHead` (dropout + linear), except ViT3D which is trained end-to-end.
 
-### Configuration
+### Configuration Label
 
-`configs/default.yaml` controls all hyperparameters. The training loop (`training/trainer.py`) includes: cosine LR with warmup, early stopping, checkpointing by val_loss.
+Output directory is auto-derived from the modality list: `--modalities T1w T1c T2w` → `results/vit3d/t1w_t1c_t2w/`.
+
+## Explainability (GradCAM)
+
+GradCAM works on all ViT-based models (ViT3D, NeuroJEPA, NeuroVFM, BrainIAC). Each exposes `forward_features()` returning unpooled patch tokens `(B, N_patches, hidden_dim)` and `get_patch_grid(volume_shape)` returning the correct `(h, w, d)` grid for reshaping.
+
+### Per-Channel Ablation
+
+For multi-modal inputs, `gradcam_multimodal` zeroes out all channels except one, computes a separate GradCAM per channel, and `gradcam_interaction` computes the difference (full CAM minus sum of per-channel CAMs) to visualize cross-channel synergies.
+
+Output saved per fold:
+```
+outputs/results/{model}/{config}/gradcam/fold_{n}/
+  sample_i_full.png          # Full multi-modal CAM
+  sample_i_ch0_t1w.png       # T1w-only CAM
+  sample_i_ch1_t1c.png       # T1c-only CAM
+  sample_i_ch2_t2w.png       # T2w-only CAM
+  sample_i_interaction.png   # Full − (sum of per-channel)
+```
+
+For single-modality: `sample_i.png`.
+
+**Real HF models**: If the loaded model returns pooled features (2D) instead of spatial patch tokens (3D), GradCAM gracefully skips with `[SKIP]` rather than crashing.
 
 ## Evaluation
 
 `eval/evaluate.py` computes: accuracy, balanced accuracy, macro-F1, weighted-F1, MCC, AUC-OVR, Brier score, ECE.
 
-`eval/metrics.py` provides `compute_metrics()` and `aggregate_fold_metrics()` for cross-validation summaries.
-
-## Explainability
-
-Two approaches (model-dependent):
-
-1. **Grad-CAM** (`explainability/gradcam.py`): 3D Grad-CAM for CNN-like architectures (NeuroJEPA, ViT3D). Multi-modal variant ablates per-channel contribution.
-
-2. **Attention Rollout** (`explainability/neurovfm.py`): For ViT-based models (NeuroVFM).
-
-`explainability/aggregate_cam.py` — per-class mean CAM volumes saved as NIfTI.
-`explainability/visualize.py` — matplotlib overlays and grid plots.
+Results saved as JSON per fold with aggregated summary:
+```
+outputs/results/{model}/{config}.json
+```
 
 ## Output Structure
 
 ```
 outputs/
+├── splits/            # Pre-computed 5-fold splits
 ├── checkpoints/       # Model weights per fold
-├── results/           # JSON metrics per model+config
-├── figures/           # ROC curves, CAM overlays
-├── cams/              # Aggregate CAM NIfTI volumes
-└── quality_cache/     # Precomputed quality scores
+├── results/           # JSON metrics + GradCAM images per model+config
+│   └── vit3d/
+│       ├── t1w.json
+│       ├── t2w.json
+│       ├── t1w_t2w.json
+│       ├── t1w_t1c_t2w.json
+│       └── t1w_t1c_t2w/gradcam/fold_0/
+│           ├── sample_0_full.png
+│           ├── sample_0_ch0_t1w.png
+│           ├── sample_0_ch1_t1c.png
+│           ├── sample_0_ch2_t2w.png
+│           └── sample_0_interaction.png
+└── selection_manifest.json
 ```
-
-## Quality of BRISQUE/CLIP-IQA on Clinical MRI
-
-The quality scoring pipeline uses off-the-shelf IQA models (BRISQUE, CLIP-IQA) from `piq`. Neither was trained on medical images. **Before relying on automated quality-based run selection, manually inspect a stratified sample** (e.g., 5 high-scoring + 5 low-scoring volumes) to confirm the scores correlate with perceived diagnostic quality. If they don't, consider replacing with a medical-image-specific IQA model or simple heuristic-based selection (e.g., signal-to-noise ratio, entropy).
 
 ## Project Structure
 
 ```
 AFR-Brain-Data/
 ├── data/
-│   ├── dataset.py         # NigerianBrainDataset, scan_raw_dataset, select_best_record
+│   ├── dataset.py         # NigerianBrainDataset, scanning, selection manifest
 │   ├── transforms.py      # Resample, normalize, augment
 │   ├── quality.py         # BRISQUE/CLIP-IQA scoring
 │   └── splits.py          # Stratified 5-fold CV
 ├── models/
 │   ├── heads.py           # ProbingHead (shared)
-│   ├── neurojepa.py       # NeuroJEPA wrapper
-│   ├── neurovfm.py        # NeuroVFM wrapper
-│   ├── brainiac.py        # BrainIAC wrapper
-│   ├── primus.py          # Primus wrapper
-│   └── vit3d_baseline.py  # ViT3D from scratch
+│   ├── neurojepa.py       # NeuroJEPA wrapper + dummy
+│   ├── neurovfm.py        # NeuroVFM wrapper + dummy
+│   ├── brainiac.py        # BrainIAC wrapper + dummy
+│   ├── primus.py          # Primus wrapper + dummy
+│   └── vit3d_baseline.py  # MONAI ViT-based baseline
 ├── training/
-│   ├── trainer.py         # Train/val loop, checkpointing
+│   ├── trainer.py         # Single-progress-bar train/val loop
 │   ├── losses.py          # FocalLoss, LabelSmoothCrossEntropy
 │   └── scheduler.py       # Cosine warmup
 ├── eval/
-│   ├── metrics.py         # All classification metrics
-│   └── evaluate.py        # evaluate_fold, run_full_evaluation
+│   ├── metrics.py         # Classification metrics + calibration
+│   └── evaluate.py        # Per-fold evaluation
 ├── explainability/
-│   ├── gradcam.py         # 3D Grad-CAM
-│   ├── aggregate_cam.py   # Mean per-class CAM
-│   └── visualize.py       # Plotting utilities
+│   ├── gradcam.py         # 3D Grad-CAM, per-channel, interaction
+│   ├── aggregate_cam.py   # Mean per-class CAM as NIfTI
+│   └── visualize.py       # Slice overlay grid plots
 ├── scripts/
-│   ├── prepare_data.py    # Separate-step preprocessing + manifest
-│   ├── precompute_quality.py
+│   ├── compute_splits.py        # Fixed 5-fold split generator
+│   ├── compute_selection_manifest.py  # Quality-based volume selection
 │   ├── train_probe.py     # Main training entry point
 │   └── skullstrip_colab.py
-├── configs/
-│   └── default.yaml
-├── manifest.md            # Dataset documentation (static)
 ├── requirements.txt
+├── participant-info.tsv   # 88-subject clinical labels
 └── README.md
 ```
 

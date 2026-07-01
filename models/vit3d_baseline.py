@@ -40,6 +40,12 @@ class ViT3D(nn.Module):
             out = out[0]
         return out.mean(dim=1)
 
+    def forward_features(self, x):
+        out = self.vit(x)
+        if isinstance(out, (tuple, list)):
+            out = out[0]
+        return out
+
     @property
     def hidden_dim(self):
         return self.embed_dim
@@ -47,3 +53,10 @@ class ViT3D(nn.Module):
     @property
     def has_cls_token(self):
         return True
+
+    def get_patch_grid(self, volume_shape):
+        return (
+            volume_shape[0] // self.patch_size,
+            volume_shape[1] // self.patch_size,
+            volume_shape[2] // self.patch_size,
+        )

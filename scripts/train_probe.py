@@ -224,7 +224,7 @@ def main():
 
         # GradCAM visualizations
         try:
-            from explainability.gradcam import gradcam_3d, gradcam_multimodal
+            from explainability.gradcam import gradcam_3d, gradcam_multimodal, gradcam_interaction
             from explainability.visualize import plot_class_cams_grid
             cam_dir = Path(args.output) / args.model / config / "gradcam" / f"fold_{fold_idx}"
             n_vis = min(4, len(test_dataset))
@@ -233,15 +233,32 @@ def main():
                 sample = test_dataset[i]
                 vol = sample["volume"].unsqueeze(0).to(args.device)
                 if n_channels > 1:
-                    cams = gradcam_multimodal(backbone, head, vol, n_channels)
+                    result = gradcam_interaction(backbone, head, vol, n_channels)
+                    if result[0] is None:
+                        print("  [SKIP] GradCAM: model outputs pooled features only")
+                        break
+                    full_cam, per_channel, interaction = result
+                    plot_class_cams_grid(
+                        {sample["label"].item(): full_cam},
+                        vol[0].mean(dim=0).cpu().numpy(), label_names,
+                        save_path=str(cam_dir / f"sample_{i}_full.png"),
+                    )
                     for ch in range(n_channels):
                         plot_class_cams_grid(
-                            {sample["label"].item(): cams[ch]},
+                            {sample["label"].item(): per_channel[ch]},
                             vol[0, ch].cpu().numpy(), label_names,
                             save_path=str(cam_dir / f"sample_{i}_ch{ch}_{modalities[ch].lower()}.png"),
                         )
+                    plot_class_cams_grid(
+                        {sample["label"].item(): interaction},
+                        vol[0].mean(dim=0).cpu().numpy(), label_names,
+                        save_path=str(cam_dir / f"sample_{i}_interaction.png"),
+                    )
                 else:
                     cam = gradcam_3d(backbone, head, vol)
+                    if cam is None:
+                        print("  [SKIP] GradCAM: model outputs pooled features only")
+                        break
                     plot_class_cams_grid(
                         {sample["label"].item(): cam},
                         vol[0, 0].cpu().numpy(), label_names,

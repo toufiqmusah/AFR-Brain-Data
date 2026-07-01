@@ -67,10 +67,22 @@ class NeuroVFMBackbone(nn.Module):
             B, D, H, W, Dp = tokens.shape
             tokens = tokens.flatten(2).transpose(1, 2)
             tokens = self._model["encoder"](tokens)
-            return tokens[0]
+            return tokens
         if isinstance(batch, dict):
             return self._model.embed(batch)
         return self._model.embed(batch)
+
+    def forward_features(self, x):
+        return self.forward(x)
+
+    def get_patch_grid(self, volume_shape):
+        if isinstance(self._model, nn.ModuleDict):
+            conv = self._model["patch_embed"]
+            h = (volume_shape[0] - conv.kernel_size[0]) // conv.stride[0] + 1
+            w = (volume_shape[1] - conv.kernel_size[1]) // conv.stride[1] + 1
+            d = (volume_shape[2] - conv.kernel_size[2]) // conv.stride[2] + 1
+            return (h, w, d)
+        return None
 
     @property
     def has_cls_token(self):
@@ -81,7 +93,7 @@ class NeuroVFMClassifier(nn.Module):
     def __init__(self, hidden_dim=768, n_classes=3, dropout=0.3):
         super().__init__()
         self.attn_pool = nn.Sequential(
-            nn.Linear(hidden_dim, 1), nn.Softmax(dim=0)
+            nn.Linear(hidden_dim, 1), nn.Softmax(dim=1)
         )
         self.classifier = nn.Sequential(
             nn.Dropout(dropout), nn.Linear(hidden_dim, n_classes)
@@ -89,7 +101,7 @@ class NeuroVFMClassifier(nn.Module):
 
     def forward(self, tokens):
         attn_weights = self.attn_pool(tokens)
-        pooled = (tokens * attn_weights).sum(dim=0, keepdim=True)
+        pooled = (tokens * attn_weights).sum(dim=1)
         return self.classifier(pooled)
 
 

@@ -69,6 +69,18 @@ class BrainIACBackbone(nn.Module):
             return tokens
         return self._model(x)
 
+    def forward_features(self, x):
+        return self.forward(x)
+
+    def get_patch_grid(self, volume_shape):
+        if isinstance(self._model, nn.ModuleDict):
+            conv = self._model["patch_embed"]
+            h = (volume_shape[0] - conv.kernel_size[0]) // conv.stride[0] + 1
+            w = (volume_shape[1] - conv.kernel_size[1]) // conv.stride[1] + 1
+            d = (volume_shape[2] - conv.kernel_size[2]) // conv.stride[2] + 1
+            return (h, w, d)
+        return None
+
 
 class BrainIACClassifier(nn.Module):
     def __init__(self, hidden_dim=768, n_classes=3, dropout=0.3):

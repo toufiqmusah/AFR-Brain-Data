@@ -52,8 +52,8 @@ class Trainer:
         self.model.eval()
         self.head.train()
         total_loss = 0.0
-        all_preds, all_labels = [], []
-        for batch in tqdm(self.train_loader, desc="  Train", leave=False):
+        n = 0
+        for batch in self.train_loader:
             x = batch["volume"].to(self.device)
             labels = batch["label"].to(self.device).long()
             self.optimizer.zero_grad()
@@ -66,10 +66,8 @@ class Trainer:
             loss.backward()
             self.optimizer.step()
             total_loss += loss.item() * x.size(0)
-            all_preds.extend(logits.argmax(dim=-1).cpu().numpy())
-            all_labels.extend(labels.cpu().numpy())
-        avg_loss = total_loss / len(self.train_loader.dataset)
-        return {"loss": avg_loss}
+            n += x.size(0)
+        return {"loss": total_loss / n}
 
     @torch.no_grad()
     def val_epoch(self) -> Dict:
@@ -77,7 +75,8 @@ class Trainer:
         self.head.eval()
         total_loss = 0.0
         all_preds, all_labels, all_probs = [], [], []
-        for batch in tqdm(self.val_loader, desc="  Val", leave=False):
+        n = 0
+        for batch in self.val_loader:
             x = batch["volume"].to(self.device)
             labels = batch["label"].to(self.device).long()
             features = self.model(x)
@@ -86,16 +85,16 @@ class Trainer:
             logits = self.head(features)
             loss = self.loss_fn(logits, labels)
             total_loss += loss.item() * x.size(0)
+            n += x.size(0)
             all_preds.extend(logits.argmax(dim=-1).cpu().numpy())
             all_labels.extend(labels.cpu().numpy())
             all_probs.append(torch.softmax(logits, dim=-1).cpu().numpy())
-        avg_loss = total_loss / len(self.val_loader.dataset)
         all_probs = np.concatenate(all_probs, axis=0)
-        return {"loss": avg_loss, "preds": all_preds, "labels": all_labels, "probs": all_probs}
+        return {"loss": total_loss / n, "preds": all_preds, "labels": all_labels, "probs": all_probs}
 
     def fit(self) -> nn.Module:
-        epoch_iter = tqdm(range(self.max_epochs), desc=f"Fold {self.fold}")
-        for epoch in epoch_iter:
+        pbar = tqdm(total=self.max_epochs, desc=f"Fold {self.fold}", unit="epoch")
+        for epoch in range(self.max_epochs):
             train_metrics = self.train_epoch()
             val_metrics = self.val_epoch()
             score = val_metrics["loss"] if self.monitor == "val_loss" else -val_metrics["loss"]
@@ -104,9 +103,7 @@ class Trainer:
                 if isinstance(self.scheduler, torch.optim.lr_scheduler._LRScheduler):
                     self.scheduler.step()
 
-            improvement = (
-                score < self.best_score if self.mode == "min" else score > self.best_score
-            )
+            improvement = (score < self.best_score if self.mode == "min" else score > self.best_score)
             if improvement:
                 self.best_score = score
                 self.best_epoch = epoch
@@ -116,11 +113,13 @@ class Trainer:
                 self.epochs_without_improvement += 1
 
             self.history.append({"epoch": epoch, "train_loss": train_metrics["loss"], "val_loss": val_metrics["loss"]})
-            epoch_iter.set_postfix(train_loss=train_metrics["loss"], val_loss=val_metrics["loss"])
+            pbar.set_postfix(train_loss=f"{train_metrics['loss']:.4f}", val_loss=f"{val_metrics['loss']:.4f}")
+            pbar.update(1)
 
             if self.epochs_without_improvement >= self.patience:
                 break
 
+        pbar.close()
         return self.load_best()
 
     def _save_checkpoint(self, epoch: int, val_metrics: Dict):

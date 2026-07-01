@@ -54,11 +54,21 @@ def compute_calibration_error(y_true, y_prob, n_bins=10):
 
 
 def aggregate_fold_metrics(all_fold_metrics):
-    metrics_keys = [k for k in all_fold_metrics[0] if k != "confusion_matrix"]
+    skip_keys = {"predictions"}
+    metrics_keys = [k for k in all_fold_metrics[0] if k not in skip_keys and k != "confusion_matrix"]
     aggregated = {}
     for k in metrics_keys:
         values = [m[k] for m in all_fold_metrics if m.get(k) is not None]
         if values:
             aggregated[f"{k}_mean"] = float(np.mean(values))
             aggregated[f"{k}_std"] = float(np.std(values))
+    # Aggregate confusion matrices by summing
+    cms = [np.array(m["confusion_matrix"]) for m in all_fold_metrics if m.get("confusion_matrix") is not None]
+    if cms:
+        aggregated["total_confusion_matrix"] = np.sum(cms, axis=0).tolist()
+    # Aggregate ECE separately
+    ece_vals = [m.get("ece") for m in all_fold_metrics if m.get("ece") is not None]
+    if ece_vals:
+        aggregated["ece_mean"] = float(np.mean(ece_vals))
+        aggregated["ece_std"] = float(np.std(ece_vals))
     return aggregated

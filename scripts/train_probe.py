@@ -36,7 +36,7 @@ def parse_args():
                         help="Pre-computed fold splits JSON")
     parser.add_argument("--participant-tsv", default=None,
                         help="Path to participant-info.tsv; defaults to --root-dir or script parent dir")
-    parser.add_argument("--model", default="vit3d", choices=["neurojepa", "neurovfm", "brainiac", "primus", "vit3d"])
+    parser.add_argument("--model", default="vit3d", choices=["neurojepa", "neurovfm", "brainiac", "primus", "vit3d", "dinov3"])
     parser.add_argument("--config", default="t1w", help="Configuration label (t1w, t2w, flair, t1_t2, t1_t2_flair)")
     parser.add_argument("--modalities", nargs="+", default=["T1w"])
     parser.add_argument("--n-folds", type=int, default=5)
@@ -60,42 +60,62 @@ def _config_label(modalities):
 
 
 def _build_backbone(args, modalities, full_dataset):
+    weights = "real"
     if args.model == "neurojepa":
         from models.neurojepa import NeuroJEPABackbone
         model = NeuroJEPABackbone()
         try:
             model.from_pretrained()
-        except Exception:
+        except Exception as e:
+            print(f"  [NeuroJEPA] HF weights failed ({e}), using dummy")
             model.load_dummy()
+            weights = "dummy"
     elif args.model == "neurovfm":
         from models.neurovfm import NeuroVFMBackbone
         model = NeuroVFMBackbone()
         try:
             model.load()
-        except Exception:
+        except Exception as e:
+            print(f"  [NeuroVFM] HF weights failed ({e}), using dummy")
             model.load_dummy()
+            weights = "dummy"
     elif args.model == "brainiac":
         from models.brainiac import BrainIACBackbone
         model = BrainIACBackbone()
         try:
             model.from_pretrained()
-        except Exception:
+        except Exception as e:
+            print(f"  [BrainIAC] HF weights failed ({e}), using dummy")
             model.load_dummy()
+            weights = "dummy"
     elif args.model == "primus":
         from models.primus import PrimusBackbone
         model = PrimusBackbone()
         try:
             model.from_pretrained()
-        except Exception:
+        except Exception as e:
+            print(f"  [Primus] HF weights failed ({e}), using dummy")
             model.load_dummy()
+            weights = "dummy"
+    elif args.model == "dinov3":
+        from models.dinov3 import DINOv3Backbone
+        model = DINOv3Backbone()
+        try:
+            model.from_pretrained()
+        except Exception as e:
+            print(f"  [DINOv3] HF weights failed ({e}), using dummy")
+            model.load_dummy()
+            weights = "dummy"
     elif args.model == "vit3d":
         from models.vit3d_baseline import ViT3D
         model = ViT3D(
             in_channels=len(modalities),
             n_classes=len(set(d["label"] for d in full_dataset.index)),
         )
+        weights = "scratch"
     else:
         raise ValueError(f"Unknown model: {args.model}")
+    model._weights = weights
     return model
 
 
@@ -144,6 +164,7 @@ def main():
     backbone_dummy = _build_backbone(args, modalities, full_dataset)
     train_backbone = args.model == "vit3d"
     n_params_backbone = sum(p.numel() for p in backbone_dummy.parameters())
+    n_params_backbone_trainable = sum(p.numel() for p in backbone_dummy.parameters() if p.requires_grad)
     head_dummy = ProbingHead(backbone_dummy.hidden_dim, 3)
     n_params_head = sum(p.numel() for p in head_dummy.parameters())
 
@@ -151,8 +172,11 @@ def main():
     backbone_mode = "end-to-end" if train_backbone else "frozen"
     print(f"\n{'='*60}")
     print(f"  Model:         {args.model} ({backbone_mode})")
+    print(f"  Weights:       {getattr(backbone_dummy, '_weights', 'unknown')}")
     print(f"  Params:        {n_params_backbone:,} backbone", end="")
-    if not train_backbone:
+    if args.model == "dinov3":
+        print(f" ({n_params_backbone_trainable:,} trainable adapters) + {n_params_head:,} head = {n_params_backbone_trainable + n_params_head:,} trainable")
+    elif not train_backbone:
         print(f" (frozen) + {n_params_head:,} head = {n_params_head:,} trainable")
     else:
         print(f" + {n_params_head:,} head = {n_params_backbone + n_params_head:,} total")
@@ -262,10 +286,12 @@ def main():
 
         head = ProbingHead(hidden_dim, n_classes).to(args.device)
         train_backbone = args.model == "vit3d"
-        if train_backbone:
+        backbone_trainable = [p for p in backbone.parameters() if p.requires_grad]
+        has_trainable_backbone = train_backbone or len(backbone_trainable) > 0
+        if has_trainable_backbone:
             backbone.train()
             optimizer = torch.optim.AdamW(
-                list(backbone.parameters()) + list(head.parameters()),
+                backbone_trainable + list(head.parameters()),
                 lr=args.lr, weight_decay=1e-4,
             )
         else:

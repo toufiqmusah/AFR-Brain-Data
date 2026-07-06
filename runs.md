@@ -49,6 +49,15 @@ python scripts/train_probe.py \
   --epochs 250 \
   --batch-size 4 \
   --output outputs/results
+
+# DINOv3-s+ — frozen DINOv3 + trainable VisionBlocks+AttentionPool (~32M, 3.5M trainable)
+python scripts/train_probe.py \
+  --root-dir /teamspace/studios/this_studio/Dataset-Stripped \
+  --model dinov3 \
+  --modalities T1w \
+  --epochs 250 \
+  --batch-size 4 \
+  --output outputs/results
 ```
 
 ## 2. Multi-Modal — T1w + T2w (75 subjects)
@@ -112,14 +121,15 @@ python scripts/train_probe.py \
 | 2 | Primus T1w | ~9h | Largest model |
 | 3 | NeuroJEPA T1w | ~7h | MoE real weights |
 | 4 | NeuroVFM T1w | ~7h | Anisotropic patches |
-| 5 | BrainIAC T1w | ~6h | Fastest frozen model |
-| 6 | ViT3D T1w+T2w | ~12h | Multi-modal baseline |
-| 7 | NeuroJEPA T1w+T2w | ~7h | Multi-modal frozen |
-| 8 | BrainIAC T1w+T2w | ~6h | Multi-modal frozen |
-| 9 | ViT3D T1w+T2w+FLAIR | ~12h | 3-channel |
-| 10 | NeuroJEPA T1w+T2w+FLAIR | ~7h | 3-channel frozen |
+| 5 | DINOv3-s+ T1w | ~15h | Frozen DINOv3 + VisionBlocks + AttentionPool |
+| 6 | BrainIAC T1w | ~6h | Fastest frozen model |
+| 7 | ViT3D T1w+T2w | ~12h | Multi-modal baseline |
+| 8 | NeuroJEPA T1w+T2w | ~7h | Multi-modal frozen |
+| 9 | BrainIAC T1w+T2w | ~6h | Multi-modal frozen |
+| 10 | ViT3D T1w+T2w+FLAIR | ~12h | 3-channel |
+| 11 | NeuroJEPA T1w+T2w+FLAIR | ~7h | 3-channel frozen |
 
-**Total**: ~80h GPU time. Can run sequentially on a single L4.
+**Total**: ~95h GPU time. Can run sequentially on a single L4.
 
 ## Notebook Runner
 

@@ -51,7 +51,8 @@ class Trainer:
         self.history = []
 
     def train_epoch(self) -> Dict:
-        if self.train_backbone:
+        has_trainable = self.train_backbone or any(p.requires_grad for p in self.model.parameters())
+        if has_trainable:
             self.model.train()
         else:
             self.model.eval()
@@ -62,7 +63,7 @@ class Trainer:
             x = batch["volume"].to(self.device)
             labels = batch["label"].to(self.device).long()
             self.optimizer.zero_grad()
-            if self.train_backbone:
+            if has_trainable:
                 features = self.model(x)
             else:
                 with torch.no_grad():
@@ -139,8 +140,11 @@ class Trainer:
             "val_metrics": val_metrics,
             "fold": self.fold,
         }
-        if self.train_backbone:
-            ckpt["model_state_dict"] = self.model.state_dict()
+        if self.train_backbone or any(p.requires_grad for p in self.model.parameters()):
+            sd = self.model.state_dict()
+            if not self.train_backbone:
+                sd = {k: v for k, v in sd.items() if not k.startswith("_model.")}
+            ckpt["model_state_dict"] = sd
         torch.save(ckpt, path)
 
     def load_best(self) -> nn.Module:
@@ -148,6 +152,6 @@ class Trainer:
         if path.exists():
             ckpt = torch.load(path, map_location=self.device, weights_only=False)
             self.head.load_state_dict(ckpt["head_state_dict"])
-            if self.train_backbone and "model_state_dict" in ckpt:
+            if "model_state_dict" in ckpt:
                 self.model.load_state_dict(ckpt["model_state_dict"])
         return self.head

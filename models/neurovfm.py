@@ -52,12 +52,12 @@ class SinCosPosEmbed3D(nn.Module):
 
 
 class Attention(nn.Module):
-    def __init__(self, dim, num_heads=12):
+    def __init__(self, dim, num_heads=12, qkv_bias=False, proj_bias=False):
         super().__init__()
         self.num_heads = num_heads
         self.scale = (dim // num_heads) ** -0.5
-        self.qkv = nn.Linear(dim, dim * 3)
-        self.proj = nn.Linear(dim, dim)
+        self.qkv = nn.Linear(dim, dim * 3, bias=qkv_bias)
+        self.proj = nn.Linear(dim, dim, bias=proj_bias)
 
     def forward(self, x):
         B, N, C = x.shape
@@ -87,7 +87,7 @@ class Block(nn.Module):
     def __init__(self, dim, num_heads, mlp_ratio=4):
         super().__init__()
         self.norm1 = nn.LayerNorm(dim)
-        self.mixer = Attention(dim, num_heads)
+        self.mixer = Attention(dim, num_heads, qkv_bias=True, proj_bias=False)
         self.norm2 = nn.LayerNorm(dim)
         self.mlp = Mlp(dim, int(dim * mlp_ratio))
 

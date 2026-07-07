@@ -36,7 +36,7 @@ def parse_args():
                         help="Pre-computed fold splits JSON")
     parser.add_argument("--participant-tsv", default=None,
                         help="Path to participant-info.tsv; defaults to --root-dir or script parent dir")
-    parser.add_argument("--model", default="vit3d", choices=["neurojepa", "neurovfm", "brainiac", "primus", "vit3d", "dinov3"])
+    parser.add_argument("--model", default="vit3d", choices=["neurojepa", "neurovfm", "brainiac", "primus", "vit3d", "dinov3", "any3d"])
     parser.add_argument("--config", default="t1w", help="Configuration label (t1w, t2w, flair, t1_t2, t1_t2_flair)")
     parser.add_argument("--modalities", nargs="+", default=["T1w"])
     parser.add_argument("--n-folds", type=int, default=5)
@@ -97,7 +97,7 @@ def _build_backbone(args, modalities, full_dataset):
             print(f"  [Primus] HF weights failed ({e}), using dummy")
             model.load_dummy()
             weights = "dummy"
-    elif args.model == "dinov3":
+    elif args.model in ("dinov3", "any3d"):
         from models.dinov3 import DINOv3Backbone
         model = DINOv3Backbone()
         try:
@@ -174,7 +174,7 @@ def main():
     print(f"  Model:         {args.model} ({backbone_mode})")
     print(f"  Weights:       {getattr(backbone_dummy, '_weights', 'unknown')}")
     print(f"  Params:        {n_params_backbone:,} backbone", end="")
-    if args.model == "dinov3":
+    if args.model in ("dinov3", "any3d"):
         print(f" ({n_params_backbone_trainable:,} trainable adapters) + {n_params_head:,} head = {n_params_backbone_trainable + n_params_head:,} trainable")
     elif not train_backbone:
         print(f" (frozen) + {n_params_head:,} head = {n_params_head:,} trainable")

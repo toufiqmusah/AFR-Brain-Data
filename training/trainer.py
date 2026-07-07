@@ -143,7 +143,8 @@ class Trainer:
         if self.train_backbone or any(p.requires_grad for p in self.model.parameters()):
             sd = self.model.state_dict()
             if not self.train_backbone:
-                sd = {k: v for k, v in sd.items() if not k.startswith("_model.")}
+                keep = {n for n, p in self.model.named_parameters() if p.requires_grad}
+                sd = {k: v for k, v in sd.items() if k in keep}
             ckpt["model_state_dict"] = sd
         torch.save(ckpt, path)
 

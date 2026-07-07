@@ -69,26 +69,34 @@ class DINOv3Backbone(nn.Module):
 
     def from_pretrained(self, model_id="facebook/dinov3-vits16plus-pretrain-lvd1689m", device=None):
         from transformers import DINOv3ViTModel
+        from peft import LoraConfig, get_peft_model
         device = device or ("cuda" if torch.cuda.is_available() else "cpu")
         try:
-            self._model = DINOv3ViTModel.from_pretrained(model_id, trust_remote_code=True)
+            backbone = DINOv3ViTModel.from_pretrained(model_id, trust_remote_code=True)
+            backbone.to(device)
+            lora_cfg = LoraConfig(
+                r=8, lora_alpha=16, lora_dropout=0.0, bias="none",
+                target_modules=["q_proj", "k_proj", "v_proj", "o_proj"],
+            )
+            self._model = get_peft_model(backbone, lora_cfg)
             self._model.eval()
-            self._model.to(device)
             self.device = device
         except Exception as e:
             print(f"  [DINOv3] HF weights failed ({e}), using dummy")
             self.load_dummy()
-        for p in self._model.parameters():
-            p.requires_grad = False
         return self
 
     def load_dummy(self):
         from transformers import DINOv3ViTConfig, DINOv3ViTModel
+        from peft import LoraConfig, get_peft_model
         config = DINOv3ViTConfig()
-        self._model = DINOv3ViTModel(config)
+        backbone = DINOv3ViTModel(config)
+        lora_cfg = LoraConfig(
+            r=8, lora_alpha=16, lora_dropout=0.0, bias="none",
+            target_modules=["q_proj", "k_proj", "v_proj", "o_proj"],
+        )
+        self._model = get_peft_model(backbone, lora_cfg)
         self._model.eval()
-        for p in self._model.parameters():
-            p.requires_grad = False
         self.device = "cpu"
         return self
 

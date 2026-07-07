@@ -11,6 +11,7 @@ einops
 safetensors
 huggingface_hub
 transformers>=4.38.0
+peft>=0.10.0
 
 # Primus
 nnunetv2>=2.0
